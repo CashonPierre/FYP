@@ -1,8 +1,14 @@
 uvicorn
-sqlmodel
 pyjwt[crypto]
 bcrypt
 pydantic
 pydantic-settings
 fastapi[standard]
 Celery
+redis
+sqlalchemy
+psycopg2-binary
+asyncpg
+numba
+cython
+ruff

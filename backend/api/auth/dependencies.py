@@ -13,21 +13,23 @@ from database.make_db import get_session
 
 
 async def get_current_user(
-  credentials: HTTPAuthorizationCredentials = Depends(dependency=HTTPBearer()),
-  session: Session = Depends(dependency=get_session),
+    credentials: HTTPAuthorizationCredentials = Depends(
+        dependency=HTTPBearer()
+    ),
+    session: Session = Depends(dependency=get_session),
 ):
-  try:
-    payload = jwt.decode(
-      jwt=credentials.credentials,
-      key=settings.jwt_secret_key,
-      algorithms=[settings.algorithm],
-      options={"require": ["sub", "exp"]},
-    )
-  except jwt.PyJWTError:
-    raise InvalidCredentialsError(message="Could not validate credentials")
+    try:
+        payload = jwt.decode(
+            jwt=credentials.credentials,
+            key=settings.jwt_secret_key,
+            algorithms=[settings.algorithm],
+            options={"require": ["sub", "exp"]},
+        )
+    except jwt.PyJWTError:
+        raise InvalidCredentialsError(message="Could not validate credentials")
 
-  user_id = payload.get("sub")
-  if check_user_id(session=session, user_id=user_id):
-    raise InvalidCredentialsError(message="Could not validate credentials")
+    user_id = payload.get("sub")
+    if check_user_id(session=session, user_id=user_id):
+        raise InvalidCredentialsError(message="Could not validate credentials")
 
-  return payload
+    return payload

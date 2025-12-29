@@ -53,13 +53,13 @@
 
 #### Python file
 
-Never:
+Dont:
 
 ```py
 from package import *
 ```
 
-Always:
+Do:
 ```py
 from package import funcA, funcB, ...
 from package.subpackage import FuncA, FuncB, ...

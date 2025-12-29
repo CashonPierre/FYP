@@ -1,2 +1,1 @@
 from .logging_middleware import LoggingMiddleware as LoggingMiddleware
-
