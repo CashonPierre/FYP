@@ -4,8 +4,8 @@
   import { Input } from '$lib/components/ui/input/index.js';
   import { Label } from '$lib/components/ui/label/index.js';
   import { Checkbox } from '$lib/components/ui/checkbox/index.js';
-  import { Lock, Mail, User, Eye, EyeOff, Loader } from 'lucide-svelte';
-  import { signupUser,  validateEmail, validatePassword } from '$lib/utils/auth.ts';
+  import { Lock, Mail, User, Eye, EyeOff, Loader } from '@lucide/svelte';
+  import { signupUser, validateEmail, validatePassword } from '$lib/utils/auth.js';
   import { goto } from '$app/navigation';
   import { toast } from 'svelte-sonner';
   import type { SignupFormData } from '$lib/types/auth.js';

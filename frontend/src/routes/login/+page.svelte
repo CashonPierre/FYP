@@ -9,7 +9,7 @@
   import { Separator } from "$lib/components/ui/separator/index.js";
   import { goto } from "$app/navigation";
   import { _ } from "svelte-i18n";
-  import { Lock, Mail, Eye, EyeOff, Loader } from "lucide-svelte";
+  import { Lock, Mail, Eye, EyeOff, Loader } from "@lucide/svelte";
   import { toast } from "svelte-sonner";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
