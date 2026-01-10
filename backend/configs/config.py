@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         )
 
     # caching
-    valkey_scheme: str = Field(default="redit")
+    valkey_scheme: str = Field(default="redis")
     valkey_host: str = Field(default="localhost")
     valkey_port: int = Field(default=6379)
     valkey_db: int = Field(default=0)
