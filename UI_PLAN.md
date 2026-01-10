@@ -13,6 +13,7 @@ This doc is UI-first: it focuses on getting a usable, coherent product experienc
 - Export/Import strategy JSON (copy/download + paste import) to share graphs and align UI→backend payload.
 - Save/Load Draft (localStorage) and real “Duplicate in Builder” flow from results.
 - Mock run + mocked results page reads stored `graph` (nodes + edges) and shows basic KPIs + placeholders.
+- Results page summary panel: P/L, annualized return, volatility, sharpe + detailed right-side breakdown.
 - Locale + tooling stability fixes (lucide import, valid `zh.json`, dev/check commands).
 - Edge rendering fix: allow SVG overflow so arrows aren’t clipped at canvas edges.
 

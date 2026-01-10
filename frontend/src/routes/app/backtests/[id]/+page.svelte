@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { Button } from '$lib/components/ui/button/index.js';
   import * as Card from '$lib/components/ui/card/index.js';
+  import { Separator } from '$lib/components/ui/separator/index.js';
   import { goto } from '$app/navigation';
   import { toast } from 'svelte-sonner';
 
@@ -20,6 +21,21 @@
 
   const runId = $derived(page.params.id);
   const IMPORT_KEY = 'backtest:import:v0';
+
+  const currency = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  });
+  const percent = new Intl.NumberFormat('en-US', {
+    style: 'percent',
+    maximumFractionDigits: 2,
+  });
+  const number3 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 });
+
+  const fmtCurrency = (v: number) => currency.format(v);
+  const fmtPercent = (v: number) => percent.format(v);
+  const fmtNumber3 = (v: number) => number3.format(v);
 
   onMount(() => {
     try {
@@ -55,6 +71,44 @@
 
     return () => clearInterval(timer);
   });
+
+  const summary = $derived.by(() => {
+    const strategyName = 'Onboarding Task Strategy';
+    const runtimeSeconds = 10;
+    const start = payload?.createdAt ? new Date(payload.createdAt) : new Date();
+    const end = new Date(start.getTime() + runtimeSeconds * 1000);
+
+    const initialCapital = 1_000_000;
+    const nav = 1_326_709.88;
+    const pl = nav - initialCapital;
+
+    return {
+      strategyName,
+      runtimeSeconds,
+      start,
+      end,
+      initialCapital,
+      nav,
+      pl,
+      annualizedReturn: 1.3462,
+      totalReturn: 0.3267,
+      transactionFees: 253.82,
+      slippage: 0,
+      triggerSymbol: 'AAPL (Apple)',
+      tradingSymbol: 'AAPL (Apple)',
+      triggerSettings: 'Apple Run once for every 1h candle',
+      accountUsed: 'Backtesting Account (0001) - Securities',
+      backtestPeriod: 'November 4, 2022 – March 4, 2023',
+      maxDrawdown: 0.232,
+      volatility: 0.4629,
+      sharpeRatio: 2.83,
+      sortinoRatio: 4.683,
+      calmarRatio: 5.802,
+      filledOrders: 98,
+      buyOrders: '98/98 (all filled)',
+      sellOrders: '0/98 (none executed)',
+    };
+  });
 </script>
 
 <div class="flex items-start justify-between gap-4">
@@ -72,7 +126,7 @@
   </div>
 </div>
 
-<div class="mt-6 grid gap-4 lg:grid-cols-[1fr_320px]">
+<div class="mt-6 grid gap-4 lg:grid-cols-[1fr_440px]">
   <section class="space-y-4">
     {#if status !== 'completed'}
       <Card.Root class="border">
@@ -94,14 +148,38 @@
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card.Root class="border">
           <Card.Header>
+            <Card.Description>Profit/Loss (P/L)</Card.Description>
+            <Card.Title class="text-xl">{fmtCurrency(summary.pl)}</Card.Title>
+          </Card.Header>
+        </Card.Root>
+        <Card.Root class="border">
+          <Card.Header>
+            <Card.Description>Annualized Return</Card.Description>
+            <Card.Title class="text-xl">{fmtPercent(summary.annualizedReturn)}</Card.Title>
+          </Card.Header>
+        </Card.Root>
+        <Card.Root class="border">
+          <Card.Header>
+            <Card.Description>Volatility</Card.Description>
+            <Card.Title class="text-xl">{fmtPercent(summary.volatility)}</Card.Title>
+          </Card.Header>
+        </Card.Root>
+        <Card.Root class="border">
+          <Card.Header>
+            <Card.Description>Sharpe Ratio</Card.Description>
+            <Card.Title class="text-xl">{fmtNumber3(summary.sharpeRatio)}</Card.Title>
+          </Card.Header>
+        </Card.Root>
+        <Card.Root class="border">
+          <Card.Header>
             <Card.Description>Total Return</Card.Description>
-            <Card.Title class="text-xl">+12.4%</Card.Title>
+            <Card.Title class="text-xl">{fmtPercent(summary.totalReturn)}</Card.Title>
           </Card.Header>
         </Card.Root>
         <Card.Root class="border">
           <Card.Header>
             <Card.Description>Max Drawdown</Card.Description>
-            <Card.Title class="text-xl">-4.1%</Card.Title>
+            <Card.Title class="text-xl">{fmtPercent(summary.maxDrawdown)}</Card.Title>
           </Card.Header>
         </Card.Root>
         <Card.Root class="border">
@@ -131,6 +209,94 @@
   </section>
 
   <aside class="space-y-4">
+    <Card.Root class="border">
+      <Card.Header>
+        <Card.Title class="text-base">
+          Backtest Summary: {summary.strategyName}
+        </Card.Title>
+        <Card.Description>Mock summary (replace with backend output later).</Card.Description>
+      </Card.Header>
+      <Card.CardContent class="space-y-4 text-sm">
+        <div class="space-y-2">
+          <div class="text-xs font-medium text-muted-foreground">Basic Information</div>
+          <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+            <dt class="text-muted-foreground">Strategy Name</dt>
+            <dd class="text-right font-medium">{summary.strategyName}</dd>
+            <dt class="text-muted-foreground">Backtest Runtime</dt>
+            <dd class="text-right font-medium">{summary.runtimeSeconds} seconds</dd>
+            <dt class="text-muted-foreground">Start Time</dt>
+            <dd class="text-right font-medium">{summary.start.toLocaleString()}</dd>
+            <dt class="text-muted-foreground">End Time</dt>
+            <dd class="text-right font-medium">{summary.end.toLocaleString()}</dd>
+          </dl>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-2">
+          <div class="text-xs font-medium text-muted-foreground">Return & Fee Performance</div>
+          <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+            <dt class="text-muted-foreground">Net Asset Value (NAV)</dt>
+            <dd class="text-right font-medium">{fmtCurrency(summary.nav)}</dd>
+            <dt class="text-muted-foreground">Profit/Loss (P/L)</dt>
+            <dd class="text-right font-medium">{fmtCurrency(summary.pl)}</dd>
+            <dt class="text-muted-foreground">Annualized Return</dt>
+            <dd class="text-right font-medium">{fmtPercent(summary.annualizedReturn)}</dd>
+            <dt class="text-muted-foreground">Total Return</dt>
+            <dd class="text-right font-medium">{fmtPercent(summary.totalReturn)}</dd>
+            <dt class="text-muted-foreground">Transaction Fees</dt>
+            <dd class="text-right font-medium">{fmtCurrency(summary.transactionFees)}</dd>
+            <dt class="text-muted-foreground">Slippage</dt>
+            <dd class="text-right font-medium">{fmtCurrency(summary.slippage)}</dd>
+          </dl>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-2">
+          <div class="text-xs font-medium text-muted-foreground">Parameters</div>
+          <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+            <dt class="text-muted-foreground">Trigger Symbol</dt>
+            <dd class="text-right font-medium">{summary.triggerSymbol}</dd>
+            <dt class="text-muted-foreground">Trading Symbol</dt>
+            <dd class="text-right font-medium">{summary.tradingSymbol}</dd>
+            <dt class="text-muted-foreground">Trigger Settings</dt>
+            <dd class="text-right font-medium">{summary.triggerSettings}</dd>
+            <dt class="text-muted-foreground">Initial Capital</dt>
+            <dd class="text-right font-medium">{fmtCurrency(summary.initialCapital)}</dd>
+            <dt class="text-muted-foreground">Account Used</dt>
+            <dd class="text-right font-medium">{summary.accountUsed}</dd>
+            <dt class="text-muted-foreground">Backtest Period</dt>
+            <dd class="text-right font-medium">{summary.backtestPeriod}</dd>
+          </dl>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-2">
+          <div class="text-xs font-medium text-muted-foreground">Performance Analysis</div>
+          <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+            <dt class="text-muted-foreground">Maximum Drawdown</dt>
+            <dd class="text-right font-medium">{fmtPercent(summary.maxDrawdown)}</dd>
+            <dt class="text-muted-foreground">Volatility</dt>
+            <dd class="text-right font-medium">{fmtPercent(summary.volatility)}</dd>
+            <dt class="text-muted-foreground">Sharpe Ratio</dt>
+            <dd class="text-right font-medium">{fmtNumber3(summary.sharpeRatio)}</dd>
+            <dt class="text-muted-foreground">Sortino Ratio</dt>
+            <dd class="text-right font-medium">{fmtNumber3(summary.sortinoRatio)}</dd>
+            <dt class="text-muted-foreground">Calmar Ratio</dt>
+            <dd class="text-right font-medium">{fmtNumber3(summary.calmarRatio)}</dd>
+            <dt class="text-muted-foreground">Filled Orders</dt>
+            <dd class="text-right font-medium">{summary.filledOrders}</dd>
+            <dt class="text-muted-foreground">Buy Orders</dt>
+            <dd class="text-right font-medium">{summary.buyOrders}</dd>
+            <dt class="text-muted-foreground">Sell Orders</dt>
+            <dd class="text-right font-medium">{summary.sellOrders}</dd>
+          </dl>
+        </div>
+      </Card.CardContent>
+    </Card.Root>
+
     <Card.Root class="border">
       <Card.Header>
         <Card.Title class="text-base">Run Config</Card.Title>
