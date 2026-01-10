@@ -14,6 +14,7 @@ This doc is UI-first: it focuses on getting a usable, coherent product experienc
 - Save/Load Draft (localStorage) and real “Duplicate in Builder” flow from results.
 - Mock run + mocked results page reads stored `graph` (nodes + edges) and shows basic KPIs + placeholders.
 - Results page summary panel: P/L, annualized return, volatility, sharpe + detailed right-side breakdown.
+- Results page charts: price candlesticks (OHLC) with buy/sell markers + equity curve line chart (mock data).
 - Locale + tooling stability fixes (lucide import, valid `zh.json`, dev/check commands).
 - Edge rendering fix: allow SVG overflow so arrows aren’t clipped at canvas edges.
 
@@ -198,6 +199,63 @@ This produces a payload where edges carry handles, e.g.:
 - `OnBar.out -> SMA.in`
 - `SMA.out -> IfAbove.a` and `SMA.out -> IfAbove.b`
 - `IfAbove.true -> Buy.in`, `IfAbove.false -> Sell.in`
+
+### Backend → Frontend results data (recommended)
+For results rendering (candles, equity, trades), the backend should return JSON that includes:
+- `summary`: the KPIs used by the right-side summary panel (P/L, annualized return, volatility, sharpe, etc).
+- `series`:
+  - `ohlc[]`: `{ time, open, high, low, close, volume? }`
+  - `equity[]`: `{ time, equity }`
+  - `trades[]`: `{ time, side: "buy"|"sell", price, qty?, symbol?, reason? }`
+
+Example (results payload v0):
+```json
+{
+  "id": "bt_123",
+  "status": "completed",
+  "summary": {
+    "strategyName": "Onboarding Task Strategy",
+    "startTime": "2026-01-04T18:21:53.000Z",
+    "endTime": "2026-01-04T18:22:03.000Z",
+    "runtimeSeconds": 10,
+    "initialCapital": 1000000,
+    "nav": 1326709.88,
+    "pl": 326709.88,
+    "totalReturn": 0.3267,
+    "annualizedReturn": 1.3462,
+    "maxDrawdown": 0.232,
+    "volatility": 0.4629,
+    "sharpe": 2.83,
+    "fees": 253.82,
+    "slippage": 0
+  },
+  "series": {
+    "ohlc": [
+      {
+        "time": "2023-11-04T14:00:00.000Z",
+        "open": 150.12,
+        "high": 151.02,
+        "low": 149.7,
+        "close": 150.66,
+        "volume": 1234567
+      }
+    ],
+    "equity": [{ "time": "2023-11-04T14:00:00.000Z", "equity": 1000000 }],
+    "trades": [
+      { "time": "2023-11-04T18:00:00.000Z", "side": "buy", "price": 150.8, "qty": 10, "symbol": "AAPL" }
+    ]
+  }
+}
+```
+
+Where to send it:
+- **Recommended**: `GET /backtests/{id}/results` returns JSON for completed runs.
+- For running jobs: `GET /backtests/{id}/status` for polling, or a websocket/SSE stream for progress + partial data.
+
+Frontend wiring options (SvelteKit):
+- `+page.server.ts` can `fetch()` the backend and return data to the page (`load`), keeping secrets server-side.
+- Or the page can fetch directly in the browser (simpler, but needs CORS/auth handling).
+- Passing a static `.json` file is fine for demos, but for real runs it should be an API response (same JSON shape).
 
 ### Validation + errors
 Validation should run continuously and show:

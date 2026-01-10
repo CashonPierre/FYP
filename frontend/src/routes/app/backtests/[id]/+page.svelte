@@ -6,6 +6,8 @@
   import { Separator } from '$lib/components/ui/separator/index.js';
   import { goto } from '$app/navigation';
   import { toast } from 'svelte-sonner';
+  import CandlestickChart, { type OhlcBar, type TradeMarker } from '$lib/components/charts/CandlestickChart.svelte';
+  import EquityCurveChart, { type EquityPoint } from '$lib/components/charts/EquityCurveChart.svelte';
 
   type RunStatus = 'queued' | 'running' | 'completed' | 'failed';
 
@@ -19,7 +21,7 @@
   };
   let payload = $state<{ createdAt: string; graph: { nodes: unknown[]; edges: unknown[] } } | null>(null);
 
-  const runId = $derived(page.params.id);
+  const runId = $derived(page.params.id ?? 'unknown');
   const IMPORT_KEY = 'backtest:import:v0';
 
   const currency = new Intl.NumberFormat('en-US', {
@@ -36,6 +38,75 @@
   const fmtCurrency = (v: number) => currency.format(v);
   const fmtPercent = (v: number) => percent.format(v);
   const fmtNumber3 = (v: number) => number3.format(v);
+
+  const seeded = (seed: number) => {
+    let t = seed >>> 0;
+    return () => {
+      t += 0x6d2b79f5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+
+  const makeMockBars = (start: Date, count: number, seed: number): OhlcBar[] => {
+    const rand = seeded(seed);
+    const bars: OhlcBar[] = [];
+    let lastClose = 150 + rand() * 20;
+    for (let i = 0; i < count; i++) {
+      const time = new Date(start.getTime() + i * 60 * 60 * 1000); // 1h bars
+      const open = lastClose;
+      const drift = (rand() - 0.5) * 1.8;
+      const close = Math.max(1, open + drift);
+      const wickUp = rand() * 1.6;
+      const wickDown = rand() * 1.6;
+      const high = Math.max(open, close) + wickUp;
+      const low = Math.max(0.5, Math.min(open, close) - wickDown);
+      bars.push({
+        time: time.toISOString(),
+        open,
+        high,
+        low,
+        close,
+      });
+      lastClose = close;
+    }
+    return bars;
+  };
+
+  const makeMockEquity = (bars: OhlcBar[], initial: number, seed: number): EquityPoint[] => {
+    const rand = seeded(seed ^ 0x9e3779b9);
+    const points: EquityPoint[] = [];
+    let equity = initial;
+    for (let i = 0; i < bars.length; i++) {
+      const step = (rand() - 0.45) * 2400;
+      equity = Math.max(initial * 0.6, equity + step);
+      points.push({ time: bars[i].time, equity });
+    }
+    return points;
+  };
+
+  const makeMockTrades = (bars: OhlcBar[], seed: number): TradeMarker[] => {
+    const rand = seeded(seed ^ 0x85ebca6b);
+    const trades: TradeMarker[] = [];
+    if (bars.length < 12) return trades;
+    const picks = new Set<number>();
+    while (picks.size < 6) picks.add(4 + Math.floor(rand() * (bars.length - 8)));
+    const idxs = [...picks].sort((a, b) => a - b);
+    for (let i = 0; i < idxs.length; i++) {
+      const bar = bars[idxs[i]];
+      trades.push({
+        time: bar.time,
+        side: i % 2 === 0 ? 'buy' : 'sell',
+        price: i % 2 === 0 ? bar.low : bar.high,
+      });
+    }
+    return trades;
+  };
+
+  let ohlc = $state<OhlcBar[]>([]);
+  let equity = $state<EquityPoint[]>([]);
+  let trades = $state<TradeMarker[]>([]);
 
   onMount(() => {
     try {
@@ -60,6 +131,12 @@
 
     status = 'running';
     progress = 5;
+
+    const seed = Array.from(runId).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    const start = payload?.createdAt ? new Date(payload.createdAt) : new Date();
+    ohlc = makeMockBars(start, 80, seed);
+    equity = makeMockEquity(ohlc, 1_000_000, seed);
+    trades = makeMockTrades(ohlc, seed);
 
     const timer = setInterval(() => {
       progress = Math.min(100, progress + 12);
@@ -198,11 +275,21 @@
 
       <Card.Root class="border">
         <Card.Header>
-          <Card.Title class="text-base">Equity Curve</Card.Title>
-          <Card.Description>Chart placeholder.</Card.Description>
+          <Card.Title class="text-base">Price (Candles)</Card.Title>
+          <Card.Description>Underlying OHLC + buy/sell markers (mock).</Card.Description>
         </Card.Header>
         <Card.CardContent>
-          <div class="h-64 rounded-md border bg-muted/30"></div>
+          <CandlestickChart bars={ohlc} trades={trades} height={280} />
+        </Card.CardContent>
+      </Card.Root>
+
+      <Card.Root class="border">
+        <Card.Header>
+          <Card.Title class="text-base">Equity Curve</Card.Title>
+          <Card.Description>Line chart (mock).</Card.Description>
+        </Card.Header>
+        <Card.CardContent>
+          <EquityCurveChart points={equity} height={220} />
         </Card.CardContent>
       </Card.Root>
     {/if}

@@ -72,6 +72,7 @@
   let pendingSourceHandle = $state<string | null>(null);
   let viewport = $state({ x: 0, y: 0, scale: 1 });
   let isPanning = $state(false);
+  let panWasStarted = $state(false);
   let panStart = $state({ x: 0, y: 0 });
   let panOrigin = $state({ x: 0, y: 0 });
   let didPan = $state(false);
@@ -281,6 +282,7 @@
     isDragging = false;
     dragNodeId = null;
     isPanning = false;
+    panWasStarted = false;
   };
 
   const connectNodes = (sourceId: string, sourceHandle: string, targetId: string, targetHandle: string) => {
@@ -1001,34 +1003,37 @@
         {nodes.length} block(s) · {edges.length} connection(s)
       </div>
     </div>
-    <div
-      id="builder-canvas"
-      class={cn(
-        'relative h-[560px] bg-linear-to-br from-muted/30 to-background',
-        isCanvasDragOver && 'ring-2 ring-primary ring-inset'
-      )}
-      role="region"
-      aria-label="Strategy canvas"
-      onpointerdown={(e) => {
-        if (e.currentTarget !== e.target) return;
-        isPanning = true;
-        didPan = false;
-        panStart = { x: e.clientX, y: e.clientY };
-        panOrigin = { x: viewport.x, y: viewport.y };
-      }}
-      onpointerup={() => {
-        if (!didPan) {
-          pendingSourceId = null;
-          pendingSourceHandle = null;
-          selectedId = null;
-        }
-        isPanning = false;
-      }}
-      onwheel={onCanvasWheel}
-      ondragover={onCanvasDragOver}
-      ondrop={onCanvasDrop}
-      ondragleave={onCanvasDragLeave}
-      ondragend={() => (isCanvasDragOver = false)}
+	    <div
+	      id="builder-canvas"
+	      class={cn(
+	        'relative h-[560px] bg-linear-to-br from-muted/30 to-background',
+	        isCanvasDragOver && 'ring-2 ring-primary ring-inset'
+	      )}
+	      role="region"
+	      aria-label="Strategy canvas"
+	      onpointerdown={(e) => {
+	        const target = e.target as Element | null;
+	        if (target?.closest?.('[data-node]')) return;
+	        isPanning = true;
+	        panWasStarted = true;
+	        didPan = false;
+	        panStart = { x: e.clientX, y: e.clientY };
+	        panOrigin = { x: viewport.x, y: viewport.y };
+	      }}
+	      onpointerup={() => {
+	        if (panWasStarted && !didPan) {
+	          pendingSourceId = null;
+	          pendingSourceHandle = null;
+	          selectedId = null;
+	        }
+	        isPanning = false;
+	        panWasStarted = false;
+	      }}
+	      onwheel={onCanvasWheel}
+	      ondragover={onCanvasDragOver}
+	      ondrop={onCanvasDrop}
+	      ondragleave={onCanvasDragLeave}
+	      ondragend={() => (isCanvasDragOver = false)}
     >
       <div
         class="absolute inset-0"
@@ -1083,14 +1088,15 @@
           </div>
         {/if}
 
-        {#each nodes as node (node.id)}
-          {@const spec = getNodeSpec(node.type)}
-          <div
-            class={cn(
-              'group absolute w-56 cursor-grab select-none rounded-md border bg-background p-3 shadow-sm',
-              node.id === selectedId ? 'ring-2 ring-primary' : 'hover:border-foreground/30',
-              pendingSourceId === node.id && 'ring-2 ring-primary ring-offset-2'
-            )}
+	        {#each nodes as node (node.id)}
+	          {@const spec = getNodeSpec(node.type)}
+	          <div
+	            data-node
+	            class={cn(
+	              'group absolute w-56 cursor-grab select-none rounded-md border bg-background p-3 shadow-sm',
+	              node.id === selectedId ? 'ring-2 ring-primary' : 'hover:border-foreground/30',
+	              pendingSourceId === node.id && 'ring-2 ring-primary ring-offset-2'
+	            )}
             style={`left:${node.x}px;top:${node.y}px;`}
             role="button"
             tabindex="0"
