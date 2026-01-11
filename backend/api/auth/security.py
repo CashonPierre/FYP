@@ -19,7 +19,7 @@ def _verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def generate_verify_url(host_prefix: str, token: str) -> str:
-    verify_url: str = f"http://{settings.host}:{settings.port}{host_prefix}/verify-email?token={token}"
+    verify_url: str = f"http://{settings.app_host}:{settings.app_port}{host_prefix}/verify-email?token={token}"
     return verify_url
 
 

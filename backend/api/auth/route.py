@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 # Custom
+from configs.config_loader import settings
 from .security import (
     authenticate_user,
     generate_verify_url,
@@ -19,9 +20,11 @@ from .schemas import (
     AccessToken,
 )
 from background.tasks import send_email_task
+from background.tasks.email import send_email
 from database.make_db import get_session
 from database.models import User
 from .repositories import is_existing_user, get_user_by_email
+from .repositories import get_user_by_id
 from common.exceptions import (
     InvalidCredentialsError,
     NotFoundError,
@@ -68,9 +71,16 @@ def reverify_email(
         host_prefix=auth_router.prefix, token=token
     )
 
-    send_email_task.delay(
-        subject="Reverify you email", to_email=db_user.email, body=verify_url
-    )
+    if settings.debug:
+        send_email(
+            subject="Reverify you email", to_email=db_user.email, body=verify_url
+        )
+    else:
+        send_email_task.delay(
+            subject="Reverify you email",
+            to_email=db_user.email,
+            body=verify_url,
+        )
 
     return Response(
         content="Please check your email", status_code=status.HTTP_200_OK
@@ -109,9 +119,16 @@ def register(
         host_prefix=auth_router.prefix, token=token
     )
 
-    send_email_task.delay(
-        subject="Verify your email", to_email=db_user.email, body=verify_url
-    )
+    if settings.debug:
+        send_email(
+            subject="Verify your email", to_email=db_user.email, body=verify_url
+        )
+    else:
+        send_email_task.delay(
+            subject="Verify your email",
+            to_email=db_user.email,
+            body=verify_url,
+        )
 
     return Response(
         status_code=status.HTTP_200_OK,
@@ -157,9 +174,9 @@ def verify_email(
     token: str, session: Session = Depends(dependency=get_session)
 ) -> Response:
     """verify email using the token link"""
-    email: str = verify_jwt_token(token=token)
+    user_id: str = verify_jwt_token(token=token)
 
-    user: User | None = get_user_by_email(session=session, email=email)
+    user: User | None = get_user_by_id(session=session, user_id=user_id)
     if not user:
         raise NotFoundError(message="User not found")
 
