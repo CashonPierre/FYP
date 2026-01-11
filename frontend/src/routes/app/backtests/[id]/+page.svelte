@@ -15,11 +15,12 @@
   let progress = $state(0);
   type StoredRunPayload = {
     createdAt: string;
+    settings?: Record<string, unknown>;
     graph?: { nodes: unknown[]; edges: unknown[] };
     nodes?: unknown[];
     edges?: unknown[];
   };
-  let payload = $state<{ createdAt: string; graph: { nodes: unknown[]; edges: unknown[] } } | null>(null);
+  let payload = $state<{ createdAt: string; settings?: Record<string, unknown>; graph: { nodes: unknown[]; edges: unknown[] } } | null>(null);
 
   const runId = $derived(page.params.id ?? 'unknown');
   const IMPORT_KEY = 'backtest:import:v0';
@@ -113,10 +114,11 @@
       const raw = sessionStorage.getItem('backtest:lastRun');
       const parsed: StoredRunPayload | null = raw ? JSON.parse(raw) : null;
       if (parsed?.graph) {
-        payload = { createdAt: parsed.createdAt, graph: parsed.graph };
+        payload = { createdAt: parsed.createdAt, settings: parsed.settings, graph: parsed.graph };
       } else if (parsed) {
         payload = {
           createdAt: parsed.createdAt,
+          settings: parsed.settings,
           graph: {
             nodes: parsed.nodes ?? [],
             edges: parsed.edges ?? [],
@@ -155,6 +157,24 @@
     const start = payload?.createdAt ? new Date(payload.createdAt) : new Date();
     const end = new Date(start.getTime() + runtimeSeconds * 1000);
 
+    const symbol =
+      (payload?.settings?.symbol && typeof payload.settings.symbol === 'string'
+        ? payload.settings.symbol
+        : 'AAPL'
+      ).toUpperCase();
+    const timeframe =
+      payload?.settings?.timeframe && typeof payload.settings.timeframe === 'string'
+        ? payload.settings.timeframe
+        : '1H';
+    const startDate =
+      payload?.settings?.startDate && typeof payload.settings.startDate === 'string'
+        ? payload.settings.startDate
+        : null;
+    const endDate =
+      payload?.settings?.endDate && typeof payload.settings.endDate === 'string'
+        ? payload.settings.endDate
+        : null;
+
     const initialCapital = 1_000_000;
     const nav = 1_326_709.88;
     const pl = nav - initialCapital;
@@ -171,11 +191,11 @@
       totalReturn: 0.3267,
       transactionFees: 253.82,
       slippage: 0,
-      triggerSymbol: 'AAPL (Apple)',
-      tradingSymbol: 'AAPL (Apple)',
-      triggerSettings: 'Apple Run once for every 1h candle',
+      triggerSymbol: symbol,
+      tradingSymbol: symbol,
+      triggerSettings: `${symbol} Run once for every ${timeframe} candle`,
       accountUsed: 'Backtesting Account (0001) - Securities',
-      backtestPeriod: 'November 4, 2022 – March 4, 2023',
+      backtestPeriod: startDate && endDate ? `${startDate} – ${endDate}` : 'Full available period',
       maxDrawdown: 0.232,
       volatility: 0.4629,
       sharpeRatio: 2.83,
