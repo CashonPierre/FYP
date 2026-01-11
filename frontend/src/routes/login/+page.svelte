@@ -8,6 +8,7 @@
   } from "$lib/components/ui/card/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import { goto } from "$app/navigation";
+  import { page } from "$app/state";
   import { _ } from "svelte-i18n";
   import { Lock, Mail, Eye, EyeOff, Loader } from "@lucide/svelte";
   import { toast } from "svelte-sonner";
@@ -18,6 +19,7 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import type { LoginFormData } from "$lib/types/auth.js";
   import type { SubmitFunction } from "@sveltejs/kit";
+  import * as Alert from "$lib/components/ui/alert/index.js";
 
   let { data } = $props();
 
@@ -30,6 +32,15 @@
 
   let showPassword = $state(false);
   let isLoading = $state(false);
+
+  const cameFromSignup = $derived(page.url.searchParams.get("signup") === "1");
+  const signupEmail = $derived(page.url.searchParams.get("email") ?? "");
+
+  $effect(() => {
+    if (cameFromSignup && signupEmail.trim().length > 0 && form.email.trim().length === 0) {
+      form.email = signupEmail;
+    }
+  });
 
   const loginEnhance: SubmitFunction = () => {
     isLoading = true;
@@ -48,7 +59,14 @@
       }
 
       if (result.type === "failure") {
-        toast.error(((result.data as any)?.message as string | undefined) ?? "Login failed.");
+        const msg =
+          ((result.data as any)?.message as string | undefined) ??
+          "Login failed.";
+        toast.error(
+          msg.includes("Invalid Credentials")
+            ? `${msg} (If you just signed up, verify your email first.)`
+            : msg
+        );
         return;
       }
 
@@ -70,6 +88,20 @@
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
+        {#if cameFromSignup}
+          <Alert.Root class="border-primary/30 bg-primary/5">
+            <Alert.Title>Account created</Alert.Title>
+            <Alert.Description>
+              Please verify your email first, then login.
+              {#if signupEmail.trim().length > 0}
+                <span class="ml-1">({signupEmail})</span>
+              {/if}
+              <div class="mt-2 text-xs text-muted-foreground">
+                Dev tip: in DEBUG mode the verify link is printed in `backend/logs/app.jsonl`.
+              </div>
+            </Alert.Description>
+          </Alert.Root>
+        {/if}
         <form method="POST" action="?/login" use:enhance={loginEnhance}>
           <div class="space-y-5">
             <!-- Email Field -->

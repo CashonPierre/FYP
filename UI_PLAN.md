@@ -19,6 +19,8 @@ This doc is UI-first: it focuses on getting a usable, coherent product experienc
 - Locale + tooling stability fixes (lucide import, valid `zh.json`, dev/check commands).
 - Edge rendering fix: allow SVG overflow so arrows aren’t clipped at canvas edges.
 - Login UX: form fields submit correctly (names added), server action calls backend `/auth/login`, token stored in `localStorage`, redirect to `/app/backtests/new`.
+- Signup UX: `/signup` now calls backend `/auth/register` (email verification still required before login).
+- Signup → Login handoff: after successful signup we redirect to `/login?signup=1` and show a “verify email first” reminder (in DEBUG, verify link is logged to `backend/logs/app.jsonl`).
 
 ### Next (UI-only, backend-friendly)
 1) Typed ports expansion (`boolean`, `series`, etc) + more condition nodes (e.g. Cross Above).
@@ -34,6 +36,7 @@ This doc is UI-first: it focuses on getting a usable, coherent product experienc
 - Locale JSON files must be valid JSON (empty `zh.json` can break startup when the browser locale is `zh`).
 - Lucide icons in this repo should be imported from `@lucide/svelte` (not `lucide-svelte`) to match the installed packages.
 - Frontend login server action calls backend at `BACKEND_ORIGIN` (defaults to `http://localhost:8000`).
+- Frontend signup server action also uses `BACKEND_ORIGIN` and maps `SignupFormData.name` → backend `username`.
 
 ### Theme + colors (change once, reuse everywhere)
 This frontend is set up with shadcn-style **semantic design tokens** (CSS variables) so we don’t hardcode colors per-component.
