@@ -3,45 +3,34 @@ from typing import Generator
 
 # External
 from sqlalchemy import create_engine
-from sqlalchemy.engine import URL
-from sqlalchemy.orm import DeclarativeBase, Session
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 
 # Custom
 from configs import settings
 
-"""
-For testing, use sqlite as it is easier to test and create,
-For production system where we need to use store TimeSeries Data,
-use postgresSQL as we can use TimeScaleDB for that
-"""
 
-postgres_sql = False
-sqlite_url = "sqlite:///./app.db"
+def _is_sqlite(url: str) -> bool:
+    return url.startswith("sqlite:")
 
-if postgres_sql:
-    url_object = URL.create(
-        drivername=settings.database_driver,
-        username=settings.database_username,
-        password=settings.database_password,
-        host=settings.database_host,
-        database=settings.database,
-        port=settings.database_port,
-    )
-    engine = create_engine(
-        url=url_object,
-        echo=settings.debug,
-        pool_size=10,
-        max_overflow=20,
-        pool_pre_ping=True,
-    )
+
+db_url = settings.database_url
+is_sqlite = _is_sqlite(db_url)
+
+engine_kwargs: dict = {
+    "url": db_url if not is_sqlite else "sqlite:///./app.db",
+    "echo": settings.debug,
+    "pool_pre_ping": False if is_sqlite else True,
+}
+
+if is_sqlite:
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
 else:
-    engine = create_engine(
-        url=sqlite_url,
-        echo=settings.debug,
-        connect_args={"check_same_thread": False},
-    )
+    engine_kwargs["pool_size"] = 10
+    engine_kwargs["max_overflow"] = 20
 
-sql_session = Session(bind=engine)
+engine = create_engine(**engine_kwargs)
+
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
 class Base(DeclarativeBase):
@@ -50,10 +39,12 @@ class Base(DeclarativeBase):
 
 def get_session() -> Generator[Session, None, None]:
     """FastAPI dependency for auto-commit/rollback"""
-    with sql_session as session:
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

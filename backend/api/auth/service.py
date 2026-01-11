@@ -58,9 +58,7 @@ def verify_jwt(token: str) -> str:
     except InvalidTokenError as e:
         raise TokenError(message="Invalid verification token") from e
 
-    email = payload.get("email")
-
-    if not isinstance(email, str) or not email:
+    sub = payload.get("sub")
+    if not isinstance(sub, str) or not sub:
         raise TokenError(message="Invalid verification token")
-
-    return email
+    return sub

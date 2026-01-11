@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 # Custom
 from configs import settings
 from common.exceptions import InvalidCredentialsError
-from .repositories import check_user_id
+from .repositories import get_user_by_id, check_user_id
+from .schemas import CurrentUser
 from database.make_db import get_session
 
 
@@ -32,4 +33,8 @@ async def get_current_user(
     if check_user_id(session=session, user_id=user_id):  # type: ignore
         raise InvalidCredentialsError(message="Could not validate credentials")
 
-    return payload
+    user = get_user_by_id(session=session, user_id=user_id) # type: ignore
+    if not user or user.is_verified is False:
+        raise InvalidCredentialsError(message="Could not validate credentials")
+
+    return CurrentUser(username=user.username, email=user.email)
