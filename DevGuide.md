@@ -9,7 +9,7 @@
 // settings.json
 {
   "[python]": {
-    "editor.tabSize": "2",
+    "editor.tabSize": "4",
     "editor.defaultFormatter": "charliermarsh.ruff"
   },
   "[svelte]": {
@@ -42,6 +42,7 @@
   - CSS wrapper [tailwind](https://tailwindcss.com/)
 
 - ### Backend
+
   - Sql database [SqlAlchemy](https://docs.sqlalchemy.org/en/20/)
   - Server [fastapi](https://fastapi.tiangolo.com/)
   - encryption [bcybt](https://github.com/pyca/bcrypt)
@@ -60,6 +61,7 @@ from package import *
 ```
 
 Do:
+
 ```py
 from package import funcA, funcB, ...
 from package.subpackage import FuncA, FuncB, ...
