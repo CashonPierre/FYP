@@ -2,7 +2,7 @@
 
 This doc is UI-first: it focuses on getting a usable, coherent product experience in the frontend even while backend backtesting endpoints are still evolving.
 
-## 0) Status (Updated 2026-01-08)
+## 0) Status (Updated 2026-01-11)
 
 ### Done
 - `/app` scaffold + shared layout shell (`AppShell`) with nav.
@@ -12,11 +12,13 @@ This doc is UI-first: it focuses on getting a usable, coherent product experienc
 - Builder validation: visible error list + per-block issues; “Run” disabled until the flow is valid.
 - Export/Import strategy JSON (copy/download + paste import) to share graphs and align UI→backend payload.
 - Save/Load Draft (localStorage) and real “Duplicate in Builder” flow from results.
+- Builder run settings: target asset (`symbol`) + backtest period (`startDate`/`endDate`, blank = full range) persisted in export/draft and passed into results mock.
 - Mock run + mocked results page reads stored `graph` (nodes + edges) and shows basic KPIs + placeholders.
 - Results page summary panel: P/L, annualized return, volatility, sharpe + detailed right-side breakdown.
 - Results page charts: price candlesticks (OHLC) with buy/sell markers + equity curve line chart (mock data).
 - Locale + tooling stability fixes (lucide import, valid `zh.json`, dev/check commands).
 - Edge rendering fix: allow SVG overflow so arrows aren’t clipped at canvas edges.
+- Login UX: form fields submit correctly (names added), server action calls backend `/auth/login`, token stored in `localStorage`, redirect to `/app/backtests/new`.
 
 ### Next (UI-only, backend-friendly)
 1) Typed ports expansion (`boolean`, `series`, etc) + more condition nodes (e.g. Cross Above).
@@ -31,6 +33,7 @@ This doc is UI-first: it focuses on getting a usable, coherent product experienc
 - If you see `Cannot find package '@sveltejs/adapter-auto'`, install frontend deps first: `cd frontend && npm install`.
 - Locale JSON files must be valid JSON (empty `zh.json` can break startup when the browser locale is `zh`).
 - Lucide icons in this repo should be imported from `@lucide/svelte` (not `lucide-svelte`) to match the installed packages.
+- Frontend login server action calls backend at `BACKEND_ORIGIN` (defaults to `http://localhost:8000`).
 
 ### Theme + colors (change once, reuse everywhere)
 This frontend is set up with shadcn-style **semantic design tokens** (CSS variables) so we don’t hardcode colors per-component.
@@ -169,7 +172,10 @@ We only need to send **configuration**, not computation. A first-pass payload th
 {
   "version": 0,
   "settings": {
+    "symbol": "AAPL",
     "timeframe": "1D",
+    "startDate": "2022-11-04",
+    "endDate": "2023-03-04",
     "initialCapital": 10000,
     "feesBps": 0,
     "slippageBps": 0

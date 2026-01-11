@@ -17,7 +17,7 @@
   import { enhance } from "$app/forms";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import type { LoginFormData } from "$lib/types/auth.js";
-  import { fromAction } from "svelte/attachments";
+  import type { SubmitFunction } from "@sveltejs/kit";
 
   let { data } = $props();
 
@@ -30,6 +30,31 @@
 
   let showPassword = $state(false);
   let isLoading = $state(false);
+
+  const loginEnhance: SubmitFunction = () => {
+    isLoading = true;
+    return async ({ result }) => {
+      isLoading = false;
+      if (result.type === "success") {
+        const token = (result.data as any)?.access_token as string | undefined;
+        if (!token) {
+          toast.error("Login succeeded but no token returned.");
+          return;
+        }
+        localStorage.setItem("token", token);
+        toast.success("Logged in");
+        goto("/app/backtests/new");
+        return;
+      }
+
+      if (result.type === "failure") {
+        toast.error(((result.data as any)?.message as string | undefined) ?? "Login failed.");
+        return;
+      }
+
+      toast.error("Login failed.");
+    };
+  };
 </script>
 <div
   class="min-h-screen flex items-center justify-center bg-linear-to-br from-gray-50 to-gray-100 p-4"
@@ -45,7 +70,7 @@
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
-        <form method="POST" action="?/login" use:enhance>
+        <form method="POST" action="?/login" use:enhance={loginEnhance}>
           <div class="space-y-5">
             <!-- Email Field -->
             <div class="space-y-3">
@@ -58,6 +83,7 @@
                 </div>
                 <Input
                   id="email"
+                  name="email"
                   type="email"
                   placeholder="example@email.com"
                   class="pl-10 h-11 bg-background border-input focus-visible:ring-2 focus-visible:ring-offset-2"
@@ -93,6 +119,7 @@
                 </div>
                 <Input
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="password"
                   minlength={8}
@@ -120,6 +147,7 @@
 
             <!-- Remember Me Checkbox -->
             <div class="flex items-start space-x-3 pt-1">
+              <input type="hidden" name="rememberMe" value={form.rememberMe ? "true" : "false"} />
               <div class="flex items-center h-5">
                 <Checkbox
 

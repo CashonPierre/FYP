@@ -7,7 +7,7 @@
   onMount(() => {
     const token = localStorage.getItem("token");
     if (token) {
-      goto("/home");
+      goto("/app/backtests/new");
     }
   });
 </script>

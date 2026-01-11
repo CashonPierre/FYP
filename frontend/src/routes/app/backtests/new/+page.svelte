@@ -80,10 +80,13 @@
   let showImport = $state(false);
   let exportJson = $state('');
   let importJson = $state('');
+  let targetSymbol = $state('AAPL');
+  let periodStart = $state(''); // YYYY-MM-DD (blank = full available range)
+  let periodEnd = $state(''); // YYYY-MM-DD (blank = full available range)
   const importPlaceholder =
     '{\n' +
     '  "version": 0,\n' +
-    '  "settings": { "timeframe": "1D", "initialCapital": 10000 },\n' +
+    '  "settings": { "symbol": "AAPL", "timeframe": "1D", "startDate": "2022-11-04", "endDate": "2023-03-04", "initialCapital": 10000 },\n' +
     '  "graph": { "nodes": [...], "edges": [...] }\n' +
     '}';
 
@@ -609,7 +612,10 @@
   type StrategyPayloadV0 = {
     version: 0;
     settings: {
+      symbol?: string;
       timeframe?: string;
+      startDate?: string;
+      endDate?: string;
       initialCapital?: number;
       feesBps?: number;
       slippageBps?: number;
@@ -629,7 +635,10 @@
     return {
       version: 0,
       settings: {
+        symbol: targetSymbol.trim() ? targetSymbol.trim().toUpperCase() : undefined,
         timeframe,
+        startDate: periodStart.trim() ? periodStart.trim() : undefined,
+        endDate: periodEnd.trim() ? periodEnd.trim() : undefined,
         initialCapital: 10000,
         feesBps: 0,
         slippageBps: 0,
@@ -726,6 +735,7 @@
 
   const applyImportedPayload = (data: unknown) => {
     if (!isRecord(data)) throw new Error('Invalid JSON root');
+    const settings = isRecord((data as any).settings) ? ((data as any).settings as Record<string, unknown>) : null;
     const graph = isRecord(data.graph) ? data.graph : data;
     if (!isRecord(graph)) throw new Error('Missing graph');
 
@@ -750,6 +760,14 @@
     pendingSourceId = null;
     pendingSourceHandle = null;
     resetView();
+
+    if (settings) {
+      targetSymbol = safeString(settings.symbol, targetSymbol);
+      const start = settings.startDate;
+      const end = settings.endDate;
+      periodStart = typeof start === 'string' ? start : '';
+      periodEnd = typeof end === 'string' ? end : '';
+    }
   };
 
   const doImport = () => {
@@ -807,10 +825,12 @@
   const runBacktest = () => {
     if (hasErrors) return;
     const runId = `mock_${Date.now()}`;
+    const exportPayload = buildExportPayload();
     sessionStorage.setItem(
       'backtest:lastRun',
       JSON.stringify({
         createdAt: new Date().toISOString(),
+        settings: exportPayload.settings,
         graph: { nodes, edges },
       })
     );
@@ -826,6 +846,33 @@
     <p class="text-sm text-muted-foreground">
       Drag blocks onto the canvas, wire an event flow, then run a mocked backtest.
     </p>
+    <div class="mt-3 grid gap-3 sm:grid-cols-3">
+      <div class="space-y-1">
+        <Label for="targetSymbol">Target Asset</Label>
+        <Input id="targetSymbol" bind:value={targetSymbol} placeholder="AAPL" />
+      </div>
+      <div class="space-y-1">
+        <Label for="periodStart">Start Date</Label>
+        <Input id="periodStart" type="date" bind:value={periodStart} />
+      </div>
+      <div class="space-y-1">
+        <Label for="periodEnd">End Date</Label>
+        <Input id="periodEnd" type="date" bind:value={periodEnd} />
+      </div>
+    </div>
+    <div class="text-xs text-muted-foreground">
+      Leave start/end blank to use the full available period.
+      <button
+        type="button"
+        class="ml-2 text-primary hover:underline"
+        onclick={() => {
+          periodStart = '';
+          periodEnd = '';
+        }}
+      >
+        Clear dates
+      </button>
+    </div>
   </div>
 
   <div class="flex items-center gap-2">
