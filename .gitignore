@@ -209,6 +209,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Engine (separate repo, not a submodule)
+engine/
+
 node_modules
 
 # Output
