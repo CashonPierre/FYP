@@ -1,0 +1,48 @@
+{
+  "term": "服务条款",
+  "privacy": "隐私政策",
+  "continue": "继续即表示你同意我们的",
+  "and": "和",
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "loading": "加载中...",
+    "error": "发生错误",
+    "back": "返回"
+  },
+  "auth": {
+    "login": {
+      "title": "登录到你的账户",
+      "description": "欢迎回来！",
+      "email": "邮箱",
+      "password": "密码",
+      "forgotPassword": "忘记密码？",
+      "rememberMe": "记住我",
+      "submit": "登录",
+      "noAccount": "还没有账户？",
+      "signup": "创建账户",
+      "logging_in": "正在登录...",
+      "login": "登录"
+    },
+    "signup": {
+      "title": "创建账户",
+      "name": "姓名",
+      "confirmPassword": "确认密码",
+      "agreeTerms": "我同意服务条款与隐私政策"
+    },
+    "resetPassword": {
+      "title": "重置密码",
+      "description": "输入邮箱以接收重置说明",
+      "successTitle": "请查收邮箱",
+      "successMessage": "我们已将重置说明发送至："
+    }
+  },
+  "navigation": {
+    "home": "首页",
+    "dashboard": "仪表盘",
+    "profile": "个人资料",
+    "settings": "设置",
+    "login": "登录",
+    "signup": "注册"
+  }
+}

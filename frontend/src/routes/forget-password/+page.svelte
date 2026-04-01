@@ -4,8 +4,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import AlertCircleIcon from "@lucide/svelte/icons/alert-circle";
-  import { Mail, ArrowLeft, CheckCircle, Loader } from "lucide-svelte";
+  import { AlertCircle, Mail, ArrowLeft, CheckCircle, Loader } from "@lucide/svelte";
   import { goto } from "$app/navigation";
   import { Icon, toast } from "svelte-sonner";
   import { resetPassword } from "$lib/utils/auth.js";
@@ -129,7 +128,7 @@
             </div>
 
             <Alert.Root variant="default" class="bg-gray-50">
-              <AlertCircleIcon />
+              <AlertCircle />
               <Alert.Description class="text-gray-600 text-sm">
                 Didn't receive the email? Check your spam folder or
                 <button

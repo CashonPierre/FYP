@@ -1,4 +1,8 @@
 # External
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'trading_engine'))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -8,6 +12,7 @@ from database.make_db import Base, engine
 from configs import settings, setup_logging
 from middlewares import LoggingMiddleware
 from api.auth import auth_router
+from api.market import market_router
 from common.exception_handlers import app_error_handler
 from common.exceptions import AppError
 
@@ -30,6 +35,7 @@ def register_middleawre(app: FastAPI) -> None:
 
 def register_routes(app: FastAPI) -> None:
     app.include_router(router=auth_router)
+    app.include_router(router=market_router)
 
 
 def register_exception_handler(app: FastAPI) -> None:
@@ -56,6 +62,6 @@ if __name__ == "__main__":
 
     Base.metadata.create_all(bind=engine)
     app: FastAPI = create_app()
-    uvicorn.run(app=app, host=settings.host, port=settings.port)
+    uvicorn.run(app=app, host=settings.app_host, port=settings.app_port)
 
     # run python server.py

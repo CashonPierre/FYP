@@ -8,8 +8,9 @@
   } from "$lib/components/ui/card/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import { goto } from "$app/navigation";
+  import { page } from "$app/state";
   import { _ } from "svelte-i18n";
-  import { Lock, Mail, Eye, EyeOff, Loader } from "lucide-svelte";
+  import { Lock, Mail, Eye, EyeOff, Loader } from "@lucide/svelte";
   import { toast } from "svelte-sonner";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -17,7 +18,8 @@
   import { enhance } from "$app/forms";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import type { LoginFormData } from "$lib/types/auth.js";
-  import { fromAction } from "svelte/attachments";
+  import type { SubmitFunction } from "@sveltejs/kit";
+  import * as Alert from "$lib/components/ui/alert/index.js";
 
   let { data } = $props();
 
@@ -30,6 +32,47 @@
 
   let showPassword = $state(false);
   let isLoading = $state(false);
+
+  const cameFromSignup = $derived(page.url.searchParams.get("signup") === "1");
+  const signupEmail = $derived(page.url.searchParams.get("email") ?? "");
+
+  $effect(() => {
+    if (cameFromSignup && signupEmail.trim().length > 0 && form.email.trim().length === 0) {
+      form.email = signupEmail;
+    }
+  });
+
+  const loginEnhance: SubmitFunction = () => {
+    isLoading = true;
+    return async ({ result }) => {
+      isLoading = false;
+      if (result.type === "success") {
+        const token = (result.data as any)?.access_token as string | undefined;
+        if (!token) {
+          toast.error("Login succeeded but no token returned.");
+          return;
+        }
+        localStorage.setItem("token", token);
+        toast.success("Logged in");
+        goto("/app/backtests/new");
+        return;
+      }
+
+      if (result.type === "failure") {
+        const msg =
+          ((result.data as any)?.message as string | undefined) ??
+          "Login failed.";
+        toast.error(
+          msg.includes("Invalid Credentials")
+            ? `${msg} (If you just signed up, verify your email first.)`
+            : msg
+        );
+        return;
+      }
+
+      toast.error("Login failed.");
+    };
+  };
 </script>
 <div
   class="min-h-screen flex items-center justify-center bg-linear-to-br from-gray-50 to-gray-100 p-4"
@@ -45,7 +88,21 @@
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
-        <form method="POST" action="?/login" use:enhance>
+        {#if cameFromSignup}
+          <Alert.Root class="border-primary/30 bg-primary/5">
+            <Alert.Title>Account created</Alert.Title>
+            <Alert.Description>
+              Please verify your email first, then login.
+              {#if signupEmail.trim().length > 0}
+                <span class="ml-1">({signupEmail})</span>
+              {/if}
+              <div class="mt-2 text-xs text-muted-foreground">
+                Dev tip: in DEBUG mode the verify link is printed in `backend/logs/app.jsonl`.
+              </div>
+            </Alert.Description>
+          </Alert.Root>
+        {/if}
+        <form method="POST" action="?/login" use:enhance={loginEnhance}>
           <div class="space-y-5">
             <!-- Email Field -->
             <div class="space-y-3">
@@ -58,6 +115,7 @@
                 </div>
                 <Input
                   id="email"
+                  name="email"
                   type="email"
                   placeholder="example@email.com"
                   class="pl-10 h-11 bg-background border-input focus-visible:ring-2 focus-visible:ring-offset-2"
@@ -93,6 +151,7 @@
                 </div>
                 <Input
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="password"
                   minlength={8}
@@ -120,6 +179,7 @@
 
             <!-- Remember Me Checkbox -->
             <div class="flex items-start space-x-3 pt-1">
+              <input type="hidden" name="rememberMe" value={form.rememberMe ? "true" : "false"} />
               <div class="flex items-center h-5">
                 <Checkbox
 

@@ -15,8 +15,8 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8"
     )
     # Server
-    host: str = Field(default="localhost")
-    port: int = Field(default=8000)
+    app_host: str = Field(default="localhost")
+    app_port: int = Field(default=8000)
     debug: bool = Field(default=False)
 
     # Database
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     database_password: str = Field(default="dbadmin")
     database_username: str = Field(default="dbuser")
     database_host: str = Field(default="localhost")
-    database_port: int = Field(default=5431)
+    database_port: int = Field(default=5432)
     database_driver: str = Field(default="postgresql+psycopg2")
 
     @computed_field
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         )
 
     # caching
-    valkey_scheme: str = Field(default="redit")
+    valkey_scheme: str = Field(default="redis")
     valkey_host: str = Field(default="localhost")
     valkey_port: int = Field(default=6379)
     valkey_db: int = Field(default=0)

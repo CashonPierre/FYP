@@ -1,5 +1,5 @@
 # STL
-from warnings import deprecated
+import uuid
 
 # External
 from sqlalchemy.orm import Session
@@ -9,7 +9,6 @@ from sqlalchemy import select
 from database.models import User
 
 
-@deprecated("use get_user_by_email instead")
 def get_user_by_username(session: Session, username: str) -> User | None:
     """get user from the SQL database based on the username"""
     statement = select(User).where(User.username == username)
@@ -32,6 +31,16 @@ def get_user_by_email(session: Session, email: str) -> User | None:
     statement = select(User).where(User.email == email)
     result = session.execute(statement=statement).scalar_one_or_none()
     return result
+
+
+def get_user_by_id(session: Session, user_id: str) -> User | None:
+    """get user from the SQL database based on the user id"""
+    try:
+        parsed = uuid.UUID(user_id)
+    except Exception:
+        return None
+    statement = select(User).where(User.id == parsed)
+    return session.execute(statement=statement).scalar_one_or_none()
 
 
 def check_user_id(session: Session, user_id: str) -> bool:

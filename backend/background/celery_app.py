@@ -3,8 +3,8 @@ from configs import settings
 
 celery_worker: Celery = Celery(
     main="tasks",
-    broker=f"{settings.valkey_scheme}{settings.valkey_host}:{settings.valkey_port}/{settings.valkey_db}",
-    backend=f"{settings.valkey_scheme}{settings.valkey_host}:{settings.valkey_port}/{settings.valkey_db}",
+    broker=settings.valkey_url,
+    backend=settings.valkey_url,
 )
 
 celery_worker.autodiscover_tasks(["background.tasks"])
