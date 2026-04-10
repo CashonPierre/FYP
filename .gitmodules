@@ -1,0 +1,3 @@
+[submodule "trading_engine"]
+	path = trading_engine
+	url = https://github.com/Quant-Backtester/trading_engine.git
