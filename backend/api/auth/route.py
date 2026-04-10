@@ -73,7 +73,9 @@ def reverify_email(
 
     if settings.debug:
         send_email(
-            subject="Reverify you email", to_email=db_user.email, body=verify_url
+            subject="Reverify you email",
+            to_email=db_user.email,
+            body=verify_url,
         )
     else:
         send_email_task.delay(
