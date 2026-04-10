@@ -29,7 +29,7 @@ async def get_current_user(
         raise InvalidCredentialsError(message="Could not validate credentials")
 
     user_id = payload.get("sub")
-    if check_user_id(session=session, user_id=user_id):
+    if check_user_id(session=session, user_id=user_id):  # type: ignore
         raise InvalidCredentialsError(message="Could not validate credentials")
 
     return payload
