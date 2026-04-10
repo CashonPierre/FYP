@@ -38,7 +38,7 @@ def get_time_tuple(rememberMe: bool) -> tuple[int, int]:
     return int(now.timestamp()), int(exp.timestamp())
 
 
-def create_jwt_token(data: BaseModel) -> str:
+def create_jwt(data: BaseModel) -> str:
     return jwt.encode(
         payload=data.model_dump(),
         key=settings.jwt_secret_key,
@@ -46,7 +46,7 @@ def create_jwt_token(data: BaseModel) -> str:
     )
 
 
-def verify_jwt_token(token: str) -> str:
+def verify_jwt(token: str) -> str:
     try:
         payload = jwt.decode(
             jwt=token,

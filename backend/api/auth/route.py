@@ -28,8 +28,8 @@ from common.exceptions import (
     ConflictError,
 )
 from .service import (
-    create_jwt_token,
-    verify_jwt_token,
+    create_jwt,
+    verify_jwt,
     get_time_tuple,
     register_user,
 )
@@ -62,7 +62,7 @@ def reverify_email(
         exp=exp,
         iat=now,
     )
-    token: str = create_jwt_token(data=data)
+    token: str = create_jwt(data=data)
 
     verify_url: str = generate_verify_url(
         host_prefix=auth_router.prefix, token=token
@@ -103,7 +103,7 @@ def register(
         exp=exp,
         iat=now,
     )
-    token: str = create_jwt_token(data=data)
+    token: str = create_jwt(data=data)
 
     verify_url: str = generate_verify_url(
         host_prefix=auth_router.prefix, token=token
@@ -138,7 +138,7 @@ def login(
         exp=exp, iat=now, sub=str(user.id), what=PayloadEnum.LOGIN
     )
 
-    access_token: str = create_jwt_token(data=token_data)
+    access_token: str = create_jwt(data=token_data)
 
     return AccessToken(token_type="bearer", access_token=access_token)
 
@@ -157,7 +157,7 @@ def verify_email(
     token: str, session: Session = Depends(dependency=get_session)
 ) -> Response:
     """verify email using the token link"""
-    email: str = verify_jwt_token(token=token)
+    email: str = verify_jwt(token=token)
 
     user: User | None = get_user_by_email(session=session, email=email)
     if not user:
