@@ -236,3 +236,6 @@ Thumbs.db
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 */.svelte-kit
+
+# Local conversation context (not for commit)
+CONTEXT.md
