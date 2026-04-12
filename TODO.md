@@ -30,13 +30,13 @@ Track what's done and what's left. Update this file as you go.
 
 - [x] SQLAlchemy + PostgreSQL configured
 - [x] Alembic structure set up
+- [x] `Strategy` model (`backend/database/models/strategies.py`)
+- [x] `BacktestRun` model (`backend/database/models/backtest_runs.py`)
+- [x] `RunMetrics` model (`backend/database/models/run_metrics.py`)
+- [x] `Trade` model (`backend/database/models/trades.py`)
 - [ ] Create initial Alembic migration (User + OhlcBar)
-- [ ] Add `Strategy` model
-- [ ] Add `BacktestRun` model (status, settings_json, timestamps)
-- [ ] Add `RunMetrics` model (return, drawdown, sharpe, etc.)
-- [ ] Add `Trade` model (per-run trades)
-- [ ] Add `EquityCurve` hypertable (per-run equity time-series)
-- [ ] Generate + apply migration for all new models
+- [ ] Generate + apply migration for new models (Strategy, BacktestRun, RunMetrics, Trade)
+- [ ] Add `EquityCurve` hypertable (post-MVP)
 
 ---
 
@@ -69,11 +69,13 @@ Track what's done and what's left. Update this file as you go.
 
 ## Engine Integration
 
-- [x] Engine added as git submodule (`engine/`, `Quant-Backtester/trading_engine`)
-- [x] Temporary `sys.path` workaround in `backend/server.py` (teammate needs to fix engine `pyproject.toml`)
+- [x] Engine added as git submodule at `trading_engine/` (Quant-Backtester/trading_engine)
 - [ ] Wire engine to accept strategy graph JSON from API
-- [ ] `DBMarketDataSource` fully implemented in engine (currently stub)
-- [ ] Engine returns structured results (trades, equity curve, metrics) storable in DB
+- [ ] `DBMarketDataSource` fully implemented in engine (currently stub) — **teammate**
+- [ ] Engine returns structured results (trades, equity curve, metrics) storable in DB — **teammate**
+- [ ] Fix `JsonMarketDataSource` wrong base class — **teammate**
+- [ ] Fix Cancel/Modify/Close signals in OrderManager — **teammate**
+- [ ] Fix `_realized_pnl` not updated on position close — **teammate**
 
 ---
 
@@ -137,6 +139,9 @@ Track what's done and what's left. Update this file as you go.
 
 ## Known Bugs / Issues
 
-- [ ] Engine `pyproject.toml` declares `src/` layout but no `src/` dir exists — `pip install -e ./engine` broken. **Teammate (engine repo) needs to fix.** Workaround: `sys.path` patch in `backend/server.py`.
+- [ ] Engine `pyproject.toml` declares `src/` layout but no `src/` dir — `pip install -e .` broken. **Teammate to fix.**
+- [ ] `trading_engine/market_data/source.py` — `JsonMarketDataSource` inherits wrong class. **Teammate to fix.**
+- [ ] `trading_engine/core/order_manager.py` — Cancel/Modify/Close signals silently ignored. **Teammate to fix.**
+- [ ] `trading_engine/core/position_manager.py` — `_realized_pnl` never updated on close. **Teammate to fix.**
 - [ ] User router (`backend/api/user/route.py`) is empty — no profile/settings endpoints.
 - [ ] Forget password UI is mocked — no backend endpoint.
