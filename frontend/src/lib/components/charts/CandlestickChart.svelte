@@ -53,7 +53,8 @@
   const formatPrice = (value: number) =>
     new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
 
-  const byTime = (time: string) => bars.findIndex((b) => b.time === time);
+  const toDate = (time: string) => time.slice(0, 10);
+  const byTime = (time: string) => bars.findIndex((b) => toDate(b.time) === toDate(time));
 
   const range = $derived.by(() => extent(bars.flatMap((b) => [b.low, b.high])));
   const candleBodyWidth = $derived.by(() => {

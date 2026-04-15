@@ -557,6 +557,24 @@
     selectedId = ifId;
   };
 
+  const loadTemplateDCA = () => {
+    const onBarId = newId('node');
+    const buyId = newId('node');
+
+    nodes = [
+      { id: onBarId, type: 'OnBar', x: 60, y: 100, label: 'OnBar', params: { timeframe: '1D' } },
+      { id: buyId, type: 'Buy', x: 340, y: 100, label: 'Buy', params: {} },
+    ];
+
+    edges = [
+      { id: newId('edge'), source: onBarId, sourceHandle: 'out', target: buyId, targetHandle: 'in' },
+    ];
+
+    pendingSourceId = null;
+    pendingSourceHandle = null;
+    selectedId = buyId;
+  };
+
   const getCanvasDropPosition = (event: DragEvent) => {
     const pt = screenToWorld(event.clientX, event.clientY);
     return { x: Math.max(0, pt.x - NODE_W / 2), y: Math.max(0, pt.y - 28) };
@@ -1077,13 +1095,20 @@
       <h2 class="font-semibold">Blocks</h2>
       <p class="text-xs text-muted-foreground">Drag to canvas (or click).</p>
     </div>
-    <div class="border-b p-3">
+    <div class="border-b p-3 space-y-2">
+      <Button
+        class="w-full"
+        variant="outline"
+        onclick={loadTemplateDCA}
+      >
+        Template: DCA
+      </Button>
       <Button
         class="w-full"
         variant="outline"
         onclick={loadTemplateSmaCrossover}
       >
-        Load Template: SMA10 &gt; SMA50
+        Template: SMA10 &gt; SMA50
       </Button>
     </div>
     <div class="p-3 space-y-2">

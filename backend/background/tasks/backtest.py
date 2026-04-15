@@ -83,8 +83,8 @@ def run_backtest(self: Task, run_id: str) -> None:
     engine = Engine(initial_cash=initial_capital)
 
     # TODO: parse graph JSON and instantiate strategy dynamically
-    # For MVP: use DCA with default params
-    engine.add_strategy(DCA(buyframe=10, buy_amount=10))
+    # For MVP: use DCA — buy every bar, no take_profit/stop_loss
+    engine.add_strategy(DCA(buyframe=1, buy_amount=10))
 
     # Push market data events
     for bar in bars:
@@ -128,28 +128,45 @@ def run_backtest(self: Task, run_id: str) -> None:
     session.add(run_metrics)
 
     # --- 8. Store Trades ---
-    for t in engine_trades:
-      # Convert YYYYMMDD int timestamp to datetime
-      ts_str = str(t.get("exit_time", 0))
+    # Each engine trade dict is a round-trip (entry + exit).
+    # Store two rows: a BUY at entry_time and a SELL at exit_time
+    # so the chart can show {B} and {S} markers separately.
+    def _parse_ts(ts_int: int) -> datetime:
       try:
-        trade_dt = datetime.strptime(ts_str, "%Y%m%d").replace(tzinfo=timezone.utc)
+        return datetime.strptime(str(ts_int), "%Y%m%d").replace(tzinfo=timezone.utc)
       except ValueError:
-        trade_dt = datetime.now(timezone.utc)
+        return datetime.now(timezone.utc)
 
-      side_val = t.get("side")
-      side_str = side_val.value.lower() if hasattr(side_val, "value") else str(side_val).lower()
+    for t in engine_trades:
+      qty = float(t.get("quantity", 0))
+      sym = t.get("symbol", symbol)
 
-      trade = Trade(
+      # Entry — BUY
+      session.add(Trade(
         run_id=run.id,
-        time=trade_dt,
-        symbol=t.get("symbol", symbol),
-        side=side_str,
-        price=float(t.get("exit_price", 0)),
-        quantity=float(t.get("quantity", 0)),
+        time=_parse_ts(t.get("entry_time", 0)),
+        symbol=sym,
+        side="buy",
+        price=float(t.get("entry_price", 0)),
+        quantity=qty,
         fee=float(t.get("commission", 0)),
         slippage=0.0,
-      )
-      session.add(trade)
+      ))
+
+      # Exit — SELL (only if position actually closed on a different bar)
+      entry_ts = t.get("entry_time", 0)
+      exit_ts = t.get("exit_time", 0)
+      if exit_ts and exit_ts != entry_ts:
+        session.add(Trade(
+          run_id=run.id,
+          time=_parse_ts(exit_ts),
+          symbol=sym,
+          side="sell",
+          price=float(t.get("exit_price", 0)),
+          quantity=qty,
+          fee=0.0,
+          slippage=0.0,
+        ))
 
     # --- 9. Mark completed ---
     run.status = "completed"

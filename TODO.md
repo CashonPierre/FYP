@@ -15,7 +15,8 @@ Track what's done and what's left. Update this file as you go.
 - [x] Frontend `/signup` wired to backend
 - [x] Signup → login redirect with "verify email" reminder
 - [ ] Forget password backend endpoint (UI exists, backend missing)
-- [ ] Auth guard for `/app/*` routes (redirect to `/login` if no token)
+- [x] Auth guard for `/app/*` routes (redirect to `/login` if no token)
+- [ ] **Email delivery via Resend** — replace fake SMTP in `background/tasks/email.py` with Resend API (free tier, 100 emails/day). Add `RESEND_API_KEY` to `.env`. Unblocks real email verification for new signups.
 
 ---
 
@@ -81,6 +82,7 @@ Track what's done and what's left. Update this file as you go.
 - [ ] Fix `JsonMarketDataSource` wrong base class — **teammate**
 - [ ] Fix Cancel/Modify/Close signals in OrderManager — **teammate**
 - [ ] Fix `_realized_pnl` never updated on close — **teammate**
+- [ ] Take profit / stop loss — general order feature, should be configurable per Buy/Sell node in the builder UI; currently disabled (`None`) in DCA until UI supports it
 
 ---
 

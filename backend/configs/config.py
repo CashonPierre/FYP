@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Server
     app_host: str = Field(default="localhost")
     app_port: int = Field(default=8000)
-    debug: bool = Field(default=False)
+    debug: bool = Field(default=True)
 
     # Database
     database: str = Field(default="appdb")
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     smtp_user: str = Field(default="test@gmail.com")
     smtp_password: str = Field(default="12345")
 
-    allowed_origin: list[str] = Field(default=["http://localhost:5173"])
+    allowed_origin: list[str] = Field(default=["http://localhost:5173", "http://localhost:5174"])
 
     allowed_methods: list[str] = Field(
         default_factory=lambda: [method.value for method in RequestEnum]
