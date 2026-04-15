@@ -25,6 +25,7 @@ from .schemas import (
   EquityPoint,
   TradePoint,
 )
+from background.tasks import run_backtest_task
 from .repositories import (
   create_backtest_run,
   get_run_by_id,
@@ -58,8 +59,8 @@ def submit_backtest(
     settings_json=settings_json,
   )
 
-  # TODO: enqueue Celery task here once engine integration is ready
-  # run_backtest_task.delay(str(run.id))
+  # Enqueue backtest in background
+  run_backtest_task.delay(str(run.id))
 
   return BacktestSubmitted(id=run.id, status=run.status)
 
