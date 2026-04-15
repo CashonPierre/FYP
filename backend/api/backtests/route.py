@@ -12,7 +12,7 @@ from database.models import BacktestRun, RunMetrics, Trade, OhlcBar
 from api.auth.dependencies import get_current_user
 from api.auth.schemas import CurrentUser
 from api.auth.repositories import get_user_by_email
-from common.exceptions import NotFoundError
+from app_common.exceptions import NotFoundError
 from .schemas import (
   BacktestCreate,
   BacktestSubmitted,

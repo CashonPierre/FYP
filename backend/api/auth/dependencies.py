@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 # Custom
 from configs import settings
-from common.exceptions import InvalidCredentialsError
+from app_common.exceptions import InvalidCredentialsError
 from .repositories import get_user_by_id
 from .schemas import CurrentUser
 from database.make_db import get_session

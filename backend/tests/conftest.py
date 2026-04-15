@@ -12,7 +12,7 @@ from database.make_db import Base, get_session
 from database.models import User
 from api.auth.service import create_jwt_token, get_time_tuple
 from api.auth.schemas import JwtToken
-from common.enums import PayloadEnum
+from app_common.enums import PayloadEnum
 
 # Use an in-memory SQLite DB for tests (fast, no Docker needed)
 TEST_DB_URL = "sqlite:///./test.db"

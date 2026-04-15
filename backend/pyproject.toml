@@ -121,3 +121,6 @@ dev = [
 pythonpath = ["."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+  "e2e: end-to-end tests that require Docker (TimescaleDB + Valkey) and a running Celery worker",
+]

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from configs import settings
 from database.models import User
 from .repositories import get_user_by_email
-from common.exceptions import InvalidCredentialsError
+from app_common.exceptions import InvalidCredentialsError
 
 
 def _verify_password(plain_password: str, hashed_password: str) -> bool:

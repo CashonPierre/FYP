@@ -822,19 +822,78 @@
     }
   });
 
-  const runBacktest = () => {
+  const BACKEND = 'http://localhost:8000';
+
+  const runBacktest = async () => {
     if (hasErrors) return;
-    const runId = `mock_${Date.now()}`;
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Not logged in');
+      goto('/login');
+      return;
+    }
+
     const exportPayload = buildExportPayload();
-    sessionStorage.setItem(
-      'backtest:lastRun',
-      JSON.stringify({
-        createdAt: new Date().toISOString(),
-        settings: exportPayload.settings,
-        graph: { nodes, edges },
-      })
-    );
-    goto(`/app/backtests/${runId}`);
+
+    // Transform camelCase frontend format → snake_case backend format
+    const body = {
+      version: exportPayload.version,
+      settings: {
+        symbol: exportPayload.settings.symbol ?? 'AAPL',
+        timeframe: exportPayload.settings.timeframe ?? '1D',
+        start_date: exportPayload.settings.startDate ?? null,
+        end_date: exportPayload.settings.endDate ?? null,
+        initial_capital: exportPayload.settings.initialCapital ?? 10000,
+        fees_bps: exportPayload.settings.feesBps ?? 0,
+        slippage_bps: exportPayload.settings.slippageBps ?? 0,
+      },
+      graph: {
+        nodes: exportPayload.graph.nodes.map((n) => ({
+          id: n.id,
+          type: n.type,
+          position: { x: n.x, y: n.y },
+          data: n.params ?? {},
+        })),
+        edges: exportPayload.graph.edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          source_handle: e.sourceHandle ?? null,
+          target_handle: e.targetHandle ?? null,
+        })),
+      },
+    };
+
+    let resp: Response;
+    try {
+      resp = await fetch(`${BACKEND}/backtests`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      toast.error('Could not reach backend — is it running?');
+      return;
+    }
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      let msg = 'Submit failed';
+      try {
+        const json = JSON.parse(text) as { detail?: string };
+        msg = json.detail ?? msg;
+      } catch { /* ignore */ }
+      toast.error(msg);
+      return;
+    }
+
+    const data = (await resp.json()) as { id: string; status: string };
+    toast.success('Backtest queued');
+    goto(`/app/backtests/${data.id}`);
   };
 </script>
 
@@ -844,7 +903,7 @@
   <div class="space-y-1">
     <h1 class="text-2xl font-bold tracking-tight">New Backtest</h1>
     <p class="text-sm text-muted-foreground">
-      Drag blocks onto the canvas, wire an event flow, then run a mocked backtest.
+      Drag blocks onto the canvas, wire an event flow, then run a backtest.
     </p>
     <div class="mt-3 grid gap-3 sm:grid-cols-3">
       <div class="space-y-1">

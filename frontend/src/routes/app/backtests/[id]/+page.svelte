@@ -9,7 +9,37 @@
   import CandlestickChart, { type OhlcBar, type TradeMarker } from '$lib/components/charts/CandlestickChart.svelte';
   import EquityCurveChart, { type EquityPoint } from '$lib/components/charts/EquityCurveChart.svelte';
 
+  const BACKEND = 'http://localhost:8000';
+
   type RunStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+  type ApiSummary = {
+    initial_capital: number;
+    final_nav: number;
+    total_return: number;
+    annualized_return: number | null;
+    max_drawdown: number | null;
+    volatility: number | null;
+    sharpe: number | null;
+    total_trades: number;
+    win_rate: number | null;
+    fees: number;
+    slippage: number;
+  };
+
+  type ApiResults = {
+    id: string;
+    status: string;
+    summary: ApiSummary | null;
+    series: {
+      ohlc: { time: string; open: number; high: number; low: number; close: number; volume: number | null }[];
+      trades: { time: string; side: string; price: number; quantity: number; symbol: string }[];
+      equity: { time: string; equity: number }[];
+    };
+  };
+
+  let apiResults = $state<ApiResults | null>(null);
+  let apiError = $state<string | null>(null);
 
   let status = $state<RunStatus>('queued');
   let progress = $state(0);
@@ -110,52 +140,116 @@
   let trades = $state<TradeMarker[]>([]);
 
   onMount(() => {
-    try {
-      const raw = sessionStorage.getItem('backtest:lastRun');
-      const parsed: StoredRunPayload | null = raw ? JSON.parse(raw) : null;
-      if (parsed?.graph) {
-        payload = { createdAt: parsed.createdAt, settings: parsed.settings, graph: parsed.graph };
-      } else if (parsed) {
-        payload = {
-          createdAt: parsed.createdAt,
-          settings: parsed.settings,
-          graph: {
-            nodes: parsed.nodes ?? [],
-            edges: parsed.edges ?? [],
-          },
-        };
-      } else {
+    // Legacy mock runs (id starts with "mock_")
+    if (runId.startsWith('mock_')) {
+      try {
+        const raw = sessionStorage.getItem('backtest:lastRun');
+        const parsed: StoredRunPayload | null = raw ? JSON.parse(raw) : null;
+        if (parsed?.graph) {
+          payload = { createdAt: parsed.createdAt, settings: parsed.settings, graph: parsed.graph };
+        } else if (parsed) {
+          payload = {
+            createdAt: parsed.createdAt,
+            settings: parsed.settings,
+            graph: { nodes: parsed.nodes ?? [], edges: parsed.edges ?? [] },
+          };
+        } else {
+          payload = null;
+        }
+      } catch {
         payload = null;
       }
-    } catch {
-      payload = null;
+
+      status = 'running';
+      progress = 5;
+      const seed = Array.from(runId).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+      const start = payload?.createdAt ? new Date(payload.createdAt) : new Date();
+      ohlc = makeMockBars(start, 80, seed);
+      equity = makeMockEquity(ohlc, 1_000_000, seed);
+      trades = makeMockTrades(ohlc, seed);
+
+      const timer = setInterval(() => {
+        progress = Math.min(100, progress + 12);
+        if (progress >= 100) {
+          status = 'completed';
+          clearInterval(timer);
+        }
+      }, 250);
+      return () => clearInterval(timer);
     }
 
-    status = 'running';
+    // Real run — poll status then fetch results
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Not logged in');
+      goto('/login');
+      return;
+    }
+
+    status = 'queued';
     progress = 5;
 
-    const seed = Array.from(runId).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-    const start = payload?.createdAt ? new Date(payload.createdAt) : new Date();
-    ohlc = makeMockBars(start, 80, seed);
-    equity = makeMockEquity(ohlc, 1_000_000, seed);
-    trades = makeMockTrades(ohlc, seed);
+    const fetchResults = async () => {
+      try {
+        const res = await fetch(`${BACKEND}/backtests/${runId}/results`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data: ApiResults = await res.json();
+        apiResults = data;
+        progress = 100;
 
-    const timer = setInterval(() => {
-      progress = Math.min(100, progress + 12);
-      if (progress >= 100) {
-        status = 'completed';
-        clearInterval(timer);
+        ohlc = data.series.ohlc.map((b) => ({
+          time: b.time,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+        }));
+        trades = data.series.trades.map((t) => ({
+          time: t.time,
+          side: t.side as 'buy' | 'sell',
+          price: t.price,
+        }));
+        equity = data.series.equity.map((e) => ({ time: e.time, equity: e.equity }));
+      } catch {
+        // results fetch failure is non-fatal; charts stay empty
       }
-    }, 250);
+    };
 
-    return () => clearInterval(timer);
+    const poll = async () => {
+      try {
+        const res = await fetch(`${BACKEND}/backtests/${runId}/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          if (res.status === 404) {
+            apiError = 'Run not found';
+            status = 'failed';
+            clearInterval(pollTimer);
+          }
+          return;
+        }
+        const data = (await res.json()) as { status: string };
+        status = data.status as RunStatus;
+        if (data.status === 'running') progress = 50;
+
+        if (data.status === 'completed' || data.status === 'failed') {
+          clearInterval(pollTimer);
+          if (data.status === 'completed') await fetchResults();
+        }
+      } catch {
+        // network blip — keep polling
+      }
+    };
+
+    poll();
+    const pollTimer = setInterval(poll, 2000);
+    return () => clearInterval(pollTimer);
   });
 
   const summary = $derived.by(() => {
-    const strategyName = 'Onboarding Task Strategy';
-    const runtimeSeconds = 10;
-    const start = payload?.createdAt ? new Date(payload.createdAt) : new Date();
-    const end = new Date(start.getTime() + runtimeSeconds * 1000);
+    const api = apiResults?.summary ?? null;
 
     const symbol =
       (payload?.settings?.symbol && typeof payload.settings.symbol === 'string'
@@ -165,7 +259,7 @@
     const timeframe =
       payload?.settings?.timeframe && typeof payload.settings.timeframe === 'string'
         ? payload.settings.timeframe
-        : '1H';
+        : '1D';
     const startDate =
       payload?.settings?.startDate && typeof payload.settings.startDate === 'string'
         ? payload.settings.startDate
@@ -175,35 +269,29 @@
         ? payload.settings.endDate
         : null;
 
-    const initialCapital = 1_000_000;
-    const nav = 1_326_709.88;
-    const pl = nav - initialCapital;
+    const initialCapital = api?.initial_capital ?? 10000;
+    const nav = api?.final_nav ?? initialCapital;
+    const totalTrades = api?.total_trades ?? 0;
+    const winRate = api?.win_rate ?? null;
 
     return {
-      strategyName,
-      runtimeSeconds,
-      start,
-      end,
       initialCapital,
       nav,
-      pl,
-      annualizedReturn: 1.3462,
-      totalReturn: 0.3267,
-      transactionFees: 253.82,
-      slippage: 0,
+      pl: nav - initialCapital,
+      totalReturn: api?.total_return ?? 0,
+      annualizedReturn: api?.annualized_return ?? null,
+      transactionFees: api?.fees ?? 0,
+      slippage: api?.slippage ?? 0,
+      maxDrawdown: api?.max_drawdown ?? null,
+      volatility: api?.volatility ?? null,
+      sharpeRatio: api?.sharpe ?? null,
       triggerSymbol: symbol,
       tradingSymbol: symbol,
-      triggerSettings: `${symbol} Run once for every ${timeframe} candle`,
-      accountUsed: 'Backtesting Account (0001) - Securities',
+      triggerSettings: `${symbol} — 1 bar per ${timeframe} candle`,
+      accountUsed: 'Backtesting Account',
       backtestPeriod: startDate && endDate ? `${startDate} – ${endDate}` : 'Full available period',
-      maxDrawdown: 0.232,
-      volatility: 0.4629,
-      sharpeRatio: 2.83,
-      sortinoRatio: 4.683,
-      calmarRatio: 5.802,
-      filledOrders: 98,
-      buyOrders: '98/98 (all filled)',
-      sellOrders: '0/98 (none executed)',
+      filledOrders: totalTrades,
+      winRate,
     };
   });
 </script>
@@ -252,19 +340,25 @@
         <Card.Root class="border">
           <Card.Header>
             <Card.Description>Annualized Return</Card.Description>
-            <Card.Title class="text-xl">{fmtPercent(summary.annualizedReturn)}</Card.Title>
+            <Card.Title class="text-xl">
+              {summary.annualizedReturn != null ? fmtPercent(summary.annualizedReturn) : '—'}
+            </Card.Title>
           </Card.Header>
         </Card.Root>
         <Card.Root class="border">
           <Card.Header>
             <Card.Description>Volatility</Card.Description>
-            <Card.Title class="text-xl">{fmtPercent(summary.volatility)}</Card.Title>
+            <Card.Title class="text-xl">
+              {summary.volatility != null ? fmtPercent(summary.volatility) : '—'}
+            </Card.Title>
           </Card.Header>
         </Card.Root>
         <Card.Root class="border">
           <Card.Header>
             <Card.Description>Sharpe Ratio</Card.Description>
-            <Card.Title class="text-xl">{fmtNumber3(summary.sharpeRatio)}</Card.Title>
+            <Card.Title class="text-xl">
+              {summary.sharpeRatio != null ? fmtNumber3(summary.sharpeRatio) : '—'}
+            </Card.Title>
           </Card.Header>
         </Card.Root>
         <Card.Root class="border">
@@ -276,19 +370,23 @@
         <Card.Root class="border">
           <Card.Header>
             <Card.Description>Max Drawdown</Card.Description>
-            <Card.Title class="text-xl">{fmtPercent(summary.maxDrawdown)}</Card.Title>
+            <Card.Title class="text-xl">
+              {summary.maxDrawdown != null ? fmtPercent(summary.maxDrawdown) : '—'}
+            </Card.Title>
           </Card.Header>
         </Card.Root>
         <Card.Root class="border">
           <Card.Header>
             <Card.Description>Trades</Card.Description>
-            <Card.Title class="text-xl">38</Card.Title>
+            <Card.Title class="text-xl">{summary.filledOrders}</Card.Title>
           </Card.Header>
         </Card.Root>
         <Card.Root class="border">
           <Card.Header>
             <Card.Description>Win Rate</Card.Description>
-            <Card.Title class="text-xl">55%</Card.Title>
+            <Card.Title class="text-xl">
+              {summary.winRate != null ? fmtPercent(summary.winRate) : '—'}
+            </Card.Title>
           </Card.Header>
         </Card.Root>
       </div>
@@ -296,7 +394,7 @@
       <Card.Root class="border">
         <Card.Header>
           <Card.Title class="text-base">Price (Candles)</Card.Title>
-          <Card.Description>Underlying OHLC + buy/sell markers (mock).</Card.Description>
+          <Card.Description>Underlying OHLC + buy/sell markers.</Card.Description>
         </Card.Header>
         <Card.CardContent>
           <CandlestickChart bars={ohlc} trades={trades} height={280} />
@@ -306,7 +404,7 @@
       <Card.Root class="border">
         <Card.Header>
           <Card.Title class="text-base">Equity Curve</Card.Title>
-          <Card.Description>Line chart (mock).</Card.Description>
+          <Card.Description>Portfolio value over time.</Card.Description>
         </Card.Header>
         <Card.CardContent>
           <EquityCurveChart points={equity} height={220} />
@@ -318,28 +416,9 @@
   <aside class="space-y-4">
     <Card.Root class="border">
       <Card.Header>
-        <Card.Title class="text-base">
-          Backtest Summary: {summary.strategyName}
-        </Card.Title>
-        <Card.Description>Mock summary (replace with backend output later).</Card.Description>
+        <Card.Title class="text-base">Backtest Summary</Card.Title>
       </Card.Header>
       <Card.CardContent class="space-y-4 text-sm">
-        <div class="space-y-2">
-          <div class="text-xs font-medium text-muted-foreground">Basic Information</div>
-          <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
-            <dt class="text-muted-foreground">Strategy Name</dt>
-            <dd class="text-right font-medium">{summary.strategyName}</dd>
-            <dt class="text-muted-foreground">Backtest Runtime</dt>
-            <dd class="text-right font-medium">{summary.runtimeSeconds} seconds</dd>
-            <dt class="text-muted-foreground">Start Time</dt>
-            <dd class="text-right font-medium">{summary.start.toLocaleString()}</dd>
-            <dt class="text-muted-foreground">End Time</dt>
-            <dd class="text-right font-medium">{summary.end.toLocaleString()}</dd>
-          </dl>
-        </div>
-
-        <Separator />
-
         <div class="space-y-2">
           <div class="text-xs font-medium text-muted-foreground">Return & Fee Performance</div>
           <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
@@ -347,10 +426,12 @@
             <dd class="text-right font-medium">{fmtCurrency(summary.nav)}</dd>
             <dt class="text-muted-foreground">Profit/Loss (P/L)</dt>
             <dd class="text-right font-medium">{fmtCurrency(summary.pl)}</dd>
-            <dt class="text-muted-foreground">Annualized Return</dt>
-            <dd class="text-right font-medium">{fmtPercent(summary.annualizedReturn)}</dd>
             <dt class="text-muted-foreground">Total Return</dt>
             <dd class="text-right font-medium">{fmtPercent(summary.totalReturn)}</dd>
+            <dt class="text-muted-foreground">Annualized Return</dt>
+            <dd class="text-right font-medium">
+              {summary.annualizedReturn != null ? fmtPercent(summary.annualizedReturn) : '—'}
+            </dd>
             <dt class="text-muted-foreground">Transaction Fees</dt>
             <dd class="text-right font-medium">{fmtCurrency(summary.transactionFees)}</dd>
             <dt class="text-muted-foreground">Slippage</dt>
@@ -363,16 +444,12 @@
         <div class="space-y-2">
           <div class="text-xs font-medium text-muted-foreground">Parameters</div>
           <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
-            <dt class="text-muted-foreground">Trigger Symbol</dt>
+            <dt class="text-muted-foreground">Symbol</dt>
             <dd class="text-right font-medium">{summary.triggerSymbol}</dd>
-            <dt class="text-muted-foreground">Trading Symbol</dt>
-            <dd class="text-right font-medium">{summary.tradingSymbol}</dd>
             <dt class="text-muted-foreground">Trigger Settings</dt>
             <dd class="text-right font-medium">{summary.triggerSettings}</dd>
             <dt class="text-muted-foreground">Initial Capital</dt>
             <dd class="text-right font-medium">{fmtCurrency(summary.initialCapital)}</dd>
-            <dt class="text-muted-foreground">Account Used</dt>
-            <dd class="text-right font-medium">{summary.accountUsed}</dd>
             <dt class="text-muted-foreground">Backtest Period</dt>
             <dd class="text-right font-medium">{summary.backtestPeriod}</dd>
           </dl>
@@ -384,21 +461,23 @@
           <div class="text-xs font-medium text-muted-foreground">Performance Analysis</div>
           <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
             <dt class="text-muted-foreground">Maximum Drawdown</dt>
-            <dd class="text-right font-medium">{fmtPercent(summary.maxDrawdown)}</dd>
+            <dd class="text-right font-medium">
+              {summary.maxDrawdown != null ? fmtPercent(summary.maxDrawdown) : '—'}
+            </dd>
             <dt class="text-muted-foreground">Volatility</dt>
-            <dd class="text-right font-medium">{fmtPercent(summary.volatility)}</dd>
+            <dd class="text-right font-medium">
+              {summary.volatility != null ? fmtPercent(summary.volatility) : '—'}
+            </dd>
             <dt class="text-muted-foreground">Sharpe Ratio</dt>
-            <dd class="text-right font-medium">{fmtNumber3(summary.sharpeRatio)}</dd>
-            <dt class="text-muted-foreground">Sortino Ratio</dt>
-            <dd class="text-right font-medium">{fmtNumber3(summary.sortinoRatio)}</dd>
-            <dt class="text-muted-foreground">Calmar Ratio</dt>
-            <dd class="text-right font-medium">{fmtNumber3(summary.calmarRatio)}</dd>
-            <dt class="text-muted-foreground">Filled Orders</dt>
+            <dd class="text-right font-medium">
+              {summary.sharpeRatio != null ? fmtNumber3(summary.sharpeRatio) : '—'}
+            </dd>
+            <dt class="text-muted-foreground">Total Trades</dt>
             <dd class="text-right font-medium">{summary.filledOrders}</dd>
-            <dt class="text-muted-foreground">Buy Orders</dt>
-            <dd class="text-right font-medium">{summary.buyOrders}</dd>
-            <dt class="text-muted-foreground">Sell Orders</dt>
-            <dd class="text-right font-medium">{summary.sellOrders}</dd>
+            <dt class="text-muted-foreground">Win Rate</dt>
+            <dd class="text-right font-medium">
+              {summary.winRate != null ? fmtPercent(summary.winRate) : '—'}
+            </dd>
           </dl>
         </div>
       </Card.CardContent>
