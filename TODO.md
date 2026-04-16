@@ -77,8 +77,8 @@ Track what's done and what's left. Update this file as you go.
 - [x] Backend renamed `common/` → `app_common/` to avoid namespace collision with engine's `common/`
 - [x] Fix `trading_engine/strategies/strategy.py` inconsistent import (was `trading_engine.common.mixins`, now `common.mixins`)
 - [x] Celery task feeds OHLC bars to engine as `MarketDataEvent`s and stores results
-- [x] **MOCKED: Strategy input** — task hardcodes `DCA(buyframe=10, buy_amount=10)` regardless of the graph JSON submitted. Graph is saved to DB but not yet parsed or used.
-- [ ] Parse graph JSON → instantiate strategy dynamically (`background/tasks/backtest.py` line 85)
+- [x] **Strategy input** — graph JSON parsed: OnBar→Buy pattern maps to `DCA(buyframe=1, buy_amount=<Buy node amount>)`
+- [x] Parse graph JSON → instantiate strategy dynamically (`background/tasks/backtest.py`)
 - [ ] `DBMarketDataSource` fully implemented — **teammate**
 - [ ] Fix `JsonMarketDataSource` wrong base class — **teammate**
 - [ ] Fix Cancel/Modify/Close signals in OrderManager — **teammate**

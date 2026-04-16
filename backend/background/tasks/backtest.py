@@ -22,6 +22,48 @@ ENGINE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'trading
 logger = get_logger()
 
 
+def _strategy_from_graph(graph: dict):
+  """
+  Parse a builder graph JSON and return an engine strategy instance.
+
+  Graph format:
+    nodes: [{id, type, position, data: {param: value, ...}}]
+    edges: [{id, source, target, source_handle, target_handle}]
+
+  Supported patterns (MVP):
+    OnBar → Buy   →  DCA(buyframe=1, buy_amount=<Buy.data.amount>)
+
+  Falls back to DCA(buyframe=1, buy_amount=10) for any unrecognised graph.
+  """
+  # Import here — ENGINE_PATH must already be on sys.path when called from run_backtest
+  from strategies.dca import DCA
+
+  nodes = {n["id"]: n for n in graph.get("nodes", [])}
+  edges = graph.get("edges", [])
+
+  # Build adjacency: source_id → list of target node dicts
+  adjacency: dict[str, list[dict]] = {}
+  for edge in edges:
+    src = edge.get("source")
+    tgt = edge.get("target")
+    if src and tgt and tgt in nodes:
+      adjacency.setdefault(src, []).append(nodes[tgt])
+
+  # Find OnBar → Buy path
+  for node in nodes.values():
+    if node.get("type") != "OnBar":
+      continue
+    for target in adjacency.get(node["id"], []):
+      if target.get("type") == "Buy":
+        buy_amount = float(target.get("data", {}).get("amount", 10))
+        logger.info("graph parser: OnBar→Buy detected, buy_amount=%s", buy_amount)
+        return DCA(buyframe=1, buy_amount=buy_amount)
+
+  # Fallback
+  logger.warning("graph parser: no recognised pattern, falling back to DCA(buyframe=1, buy_amount=10)")
+  return DCA(buyframe=1, buy_amount=10)
+
+
 @celery_worker.task(bind=True, max_retries=0)
 def run_backtest(self: Task, run_id: str) -> None:
   # Import engine here so the path insert happens before any engine module loads
@@ -29,7 +71,6 @@ def run_backtest(self: Task, run_id: str) -> None:
     sys.path.insert(0, ENGINE_PATH)
 
   from core.engine import Engine
-  from strategies.dca import DCA
   from events.event import MarketDataEvent
   from events.payloads.market_payload import MarketDataPayload
 
@@ -82,9 +123,9 @@ def run_backtest(self: Task, run_id: str) -> None:
     # --- 4. Set up engine ---
     engine = Engine(initial_cash=initial_capital)
 
-    # TODO: parse graph JSON and instantiate strategy dynamically
-    # For MVP: use DCA — buy every bar, no take_profit/stop_loss
-    engine.add_strategy(DCA(buyframe=1, buy_amount=10))
+    graph = settings.get("graph", {})
+    strategy = _strategy_from_graph(graph)
+    engine.add_strategy(strategy)
 
     # Push market data events
     for bar in bars:

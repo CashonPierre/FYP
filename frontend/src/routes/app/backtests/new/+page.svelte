@@ -213,6 +213,8 @@
         return { period: 20 };
       case 'RSI':
         return { period: 14, overbought: 70, oversold: 30 };
+      case 'Buy':
+        return { amount: 10 };
       case 'Data':
         return { timeframe: '1D' };
       default:
