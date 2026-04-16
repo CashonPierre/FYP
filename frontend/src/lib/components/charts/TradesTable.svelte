@@ -54,7 +54,7 @@
       </tr>
     </thead>
     <tbody>
-      {#each sorted as t (`${t.time}-${t.side}-${t.price}`)}
+      {#each sorted as t, i (`${t.time}-${t.side}-${t.price}-${t.quantity ?? ''}-${i}`)}
         <tr class="border-b last:border-0 hover:bg-muted/40">
           <td class="px-4 py-2 tabular-nums text-muted-foreground">{fmtDate(t.time)}</td>
           <td class="px-4 py-2">
