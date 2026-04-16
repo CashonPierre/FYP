@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 # custom
-from common.exceptions import TokenError, TokenExpiredError
+from app_common.exceptions import TokenError, TokenExpiredError
 from database.models import User
 from configs import get_logger, settings
 from .security import hash_password

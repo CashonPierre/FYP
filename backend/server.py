@@ -1,8 +1,4 @@
 # External
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'trading_engine'))
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -13,8 +9,10 @@ from configs import settings, setup_logging
 from middlewares import LoggingMiddleware
 from api.auth import auth_router
 from api.market import market_router
-from common.exception_handlers import app_error_handler
-from common.exceptions import AppError
+from api.backtests import backtest_router
+from api.strategies import strategy_router
+from app_common.exception_handlers import app_error_handler
+from app_common.exceptions import AppError
 
 
 def register_middleawre(app: FastAPI) -> None:
@@ -36,6 +34,8 @@ def register_middleawre(app: FastAPI) -> None:
 def register_routes(app: FastAPI) -> None:
     app.include_router(router=auth_router)
     app.include_router(router=market_router)
+    app.include_router(router=backtest_router)
+    app.include_router(router=strategy_router)
 
 
 def register_exception_handler(app: FastAPI) -> None:

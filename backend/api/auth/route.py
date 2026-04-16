@@ -25,7 +25,7 @@ from database.make_db import get_session
 from database.models import User
 from .repositories import is_existing_user, get_user_by_email
 from .repositories import get_user_by_id
-from common.exceptions import (
+from app_common.exceptions import (
     InvalidCredentialsError,
     NotFoundError,
     ConflictError,
@@ -36,7 +36,7 @@ from .service import (
     get_time_tuple,
     register_user,
 )
-from common.enums import PayloadEnum
+from app_common.enums import PayloadEnum
 
 
 auth_router = APIRouter(prefix="/auth", tags=["Authentication endpoints"])

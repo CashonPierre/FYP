@@ -18,7 +18,7 @@ from starlette.types import ASGIApp
 # Custom
 from configs import get_logger, settings
 from .logging_types import HttpResponseLog, HttpRequestLog, HttpErrorLog
-from common.enums import RequestEnum
+from app_common.enums import RequestEnum
 
 
 class EventEnum(StrEnum):

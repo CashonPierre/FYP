@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, EmailStr
 
 # Custom
-from common.enums import PayloadEnum
+from app_common.enums import PayloadEnum
 
 
 class LoginRequest(BaseModel):
