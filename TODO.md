@@ -57,6 +57,7 @@ Track what's done and what's left. Update this file as you go.
 - [x] `POST /strategies` — save a strategy graph
 - [x] `GET /strategies` — list user's saved strategies
 - [x] `GET /strategies/{id}` — get a single strategy
+- [ ] `PUT /strategies/{id}` — overwrite existing strategy (currently POST always creates a new one, duplicates accumulate)
 
 ---
 
@@ -111,7 +112,7 @@ Track what's done and what's left. Update this file as you go.
 - [x] **MOCKED: "From sessionStorage (mock)"** label on Run Config card — removed
 - [ ] Equity curve is always empty (engine doesn't emit equity snapshots yet)
 - [x] Failed state — shows error card with message from API
-- [ ] Trades table (sortable, filterable) — currently only shown as chart markers
+- [x] Trades table (sortable by date/side/price/qty) — shown below equity curve on results page
 
 ---
 
@@ -147,7 +148,7 @@ Track what's done and what's left. Update this file as you go.
 - [x] `ARCHITECTURE.md` — file/folder tree with descriptions
 - [x] `.vscode/settings.json` — VS Code Python interpreter set to backend `.venv`
 - [ ] Docker Compose file for full local stack (backend + TimescaleDB + Valkey + Celery)
-- [ ] Alembic migration applied so teammates can `uv run python -m alembic upgrade head` instead of relying on `create_all`
+- [x] Alembic migration applied — `uv run python -m alembic upgrade head` creates full schema on a fresh DB
 
 ---
 

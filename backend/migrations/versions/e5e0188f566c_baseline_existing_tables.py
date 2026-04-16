@@ -48,13 +48,13 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('symbol', 'timeframe', 'time'),
     )
     op.execute("SELECT create_hypertable('ohlc_bars', 'time', if_not_exists => TRUE)")
-    op.create_index(op.f('ohlc_bars_time_idx'), 'ohlc_bars', [sa.literal_column('time DESC')], unique=False)
-    op.create_index(op.f('idx_ohlc_bars_symbol_time_desc'), 'ohlc_bars', ['symbol', 'timeframe', sa.literal_column('time DESC')], unique=False)
+    op.execute("CREATE INDEX ohlc_bars_time_idx ON ohlc_bars (time DESC)")
+    op.execute("CREATE INDEX idx_ohlc_bars_symbol_time_desc ON ohlc_bars (symbol, timeframe, time DESC)")
 
 
 def downgrade() -> None:
-    op.drop_index(op.f('idx_ohlc_bars_symbol_time_desc'), table_name='ohlc_bars')
-    op.drop_index(op.f('ohlc_bars_time_idx'), table_name='ohlc_bars')
+    op.execute("DROP INDEX IF EXISTS idx_ohlc_bars_symbol_time_desc")
+    op.execute("DROP INDEX IF EXISTS ohlc_bars_time_idx")
     op.drop_table('ohlc_bars')
     op.drop_index(op.f('ix_users_username'), table_name='users')
     op.drop_index(op.f('ix_users_email'), table_name='users')
