@@ -94,6 +94,13 @@
   const IMPORT_KEY = 'backtest:import:v0';
 
   const selected = $derived(nodes.find((n) => n.id === selectedId) ?? null);
+
+  // Seed missing params when a node is selected so the inspector always has defaults
+  $effect(() => {
+    if (selected?.type === 'Buy' && selected.params.amount == null) {
+      updateNodeParam(selected.id, 'amount', 10);
+    }
+  });
   const nodeMap = $derived(new Map(nodes.map((n) => [n.id, n] as const)));
   const selectedEdges = $derived({
     incoming: selectedId ? edges.filter((e) => e.target === selectedId) : [],
@@ -1605,12 +1612,13 @@
             <Input
               id="buyAmount"
               type="number"
-              min="0.01"
+              min="1"
               step="1"
               value={String(selected.params.amount ?? 10)}
-              oninput={(e) =>
-                updateNodeParam(selected.id, 'amount', Number((e.currentTarget as HTMLInputElement).value))
-              }
+              oninput={(e) => {
+                const v = parseFloat((e.currentTarget as HTMLInputElement).value);
+                if (!isNaN(v) && v > 0) updateNodeParam(selected.id, 'amount', v);
+              }}
             />
           </div>
         {/if}
