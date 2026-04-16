@@ -11,6 +11,7 @@
     time: string;
     side: "buy" | "sell";
     price: number;
+    quantity?: number;
   };
 
   let {

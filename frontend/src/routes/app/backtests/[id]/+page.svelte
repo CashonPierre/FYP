@@ -8,6 +8,7 @@
   import { toast } from 'svelte-sonner';
   import CandlestickChart, { type OhlcBar, type TradeMarker } from '$lib/components/charts/CandlestickChart.svelte';
   import EquityCurveChart, { type EquityPoint } from '$lib/components/charts/EquityCurveChart.svelte';
+  import TradesTable from '$lib/components/charts/TradesTable.svelte';
 
   const BACKEND = 'http://localhost:8000';
 
@@ -210,6 +211,7 @@
           time: t.time,
           side: t.side as 'buy' | 'sell',
           price: t.price,
+          quantity: t.quantity,
         }));
         equity = data.series.equity.map((e) => ({ time: e.time, equity: e.equity }));
       } catch {
@@ -230,13 +232,14 @@
           }
           return;
         }
-        const data = (await res.json()) as { status: string };
+        const data = (await res.json()) as { status: string; error_message?: string | null };
         status = data.status as RunStatus;
         if (data.status === 'running') progress = 50;
 
         if (data.status === 'completed' || data.status === 'failed') {
           clearInterval(pollTimer);
           if (data.status === 'completed') await fetchResults();
+          if (data.status === 'failed') apiError = data.error_message ?? 'Backtest failed.';
         }
       } catch {
         // network blip — keep polling
@@ -313,11 +316,28 @@
 
 <div class="mt-6 grid gap-4 lg:grid-cols-[1fr_440px]">
   <section class="space-y-4">
-    {#if status !== 'completed'}
+    {#if status === 'failed'}
+      <Card.Root class="border border-destructive">
+        <Card.Header>
+          <Card.Title class="text-base text-destructive">Backtest Failed</Card.Title>
+          <Card.Description>The backtest encountered an error and could not complete.</Card.Description>
+        </Card.Header>
+        <Card.CardContent>
+          <p class="text-sm text-muted-foreground">
+            {apiError ?? 'An unknown error occurred. Check the Celery worker logs for details.'}
+          </p>
+          <Button class="mt-4" variant="outline" onclick={() => goto('/app/backtests/new')}>
+            Try Again
+          </Button>
+        </Card.CardContent>
+      </Card.Root>
+    {:else if status !== 'completed'}
       <Card.Root class="border">
         <Card.Header>
-          <Card.Title class="text-base">Running (mock)</Card.Title>
-          <Card.Description>Replace with real job polling later.</Card.Description>
+          <Card.Title class="text-base capitalize">{status}</Card.Title>
+          <Card.Description>
+            {status === 'queued' ? 'Waiting for a worker to pick up this job…' : 'Running backtest, this may take a few seconds…'}
+          </Card.Description>
         </Card.Header>
         <Card.CardContent class="space-y-3">
           <div class="h-2 w-full rounded bg-muted">
@@ -410,6 +430,18 @@
           <EquityCurveChart points={equity} height={220} />
         </Card.CardContent>
       </Card.Root>
+
+      {#if trades.length > 0}
+        <Card.Root class="border">
+          <Card.Header>
+            <Card.Title class="text-base">Trades</Card.Title>
+            <Card.Description>{trades.length} entries/exits — click a column header to sort.</Card.Description>
+          </Card.Header>
+          <Card.CardContent class="p-0">
+            <TradesTable {trades} />
+          </Card.CardContent>
+        </Card.Root>
+      {/if}
     {/if}
   </section>
 
@@ -486,7 +518,6 @@
     <Card.Root class="border">
       <Card.Header>
         <Card.Title class="text-base">Run Config</Card.Title>
-        <Card.Description>From sessionStorage (mock).</Card.Description>
       </Card.Header>
       <Card.CardContent>
         {#if payload}

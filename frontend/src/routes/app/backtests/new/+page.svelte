@@ -842,6 +842,76 @@
 
   const BACKEND = 'http://localhost:8000';
 
+  // --- Save / Load strategy ---
+  let showSave = $state(false);
+  let showLoad = $state(false);
+  let saveName = $state('');
+  let savedStrategies = $state<{ id: string; name: string; updated_at: string }[]>([]);
+
+  const openSave = () => {
+    saveName = '';
+    showSave = true;
+    showLoad = false;
+    showExport = false;
+    showImport = false;
+  };
+
+  const openLoad = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) { toast.error('Not logged in'); goto('/login'); return; }
+    try {
+      const res = await fetch(`${BACKEND}/strategies`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { toast.error('Could not load strategies'); return; }
+      savedStrategies = await res.json();
+    } catch {
+      toast.error('Could not reach backend');
+      return;
+    }
+    showLoad = true;
+    showSave = false;
+    showExport = false;
+    showImport = false;
+  };
+
+  const saveStrategy = async () => {
+    if (!saveName.trim()) { toast.error('Enter a strategy name'); return; }
+    const token = localStorage.getItem('token');
+    if (!token) { toast.error('Not logged in'); goto('/login'); return; }
+
+    const payload = buildExportPayload();
+    try {
+      const res = await fetch(`${BACKEND}/strategies`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: saveName.trim(), graph_json: payload }),
+      });
+      if (!res.ok) { toast.error('Save failed'); return; }
+      toast.success(`Strategy "${saveName.trim()}" saved`);
+      showSave = false;
+    } catch {
+      toast.error('Could not reach backend');
+    }
+  };
+
+  const loadStrategy = async (id: string) => {
+    const token = localStorage.getItem('token');
+    if (!token) { toast.error('Not logged in'); goto('/login'); return; }
+    try {
+      const res = await fetch(`${BACKEND}/strategies/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { toast.error('Could not load strategy'); return; }
+      const data = await res.json() as { graph_json: { version: number; settings: Record<string, unknown>; graph: { nodes: unknown[]; edges: unknown[] } } };
+      applyImportedPayload(data.graph_json);
+      showLoad = false;
+      toast.success('Strategy loaded');
+    } catch {
+      toast.error('Could not reach backend');
+    }
+  };
+
   const runBacktest = async () => {
     if (hasErrors) return;
 
@@ -959,6 +1029,8 @@
     <Button variant="outline" onclick={loadDraft}>Load Draft</Button>
     <Button variant="outline" onclick={openImport}>Import</Button>
     <Button variant="outline" onclick={openExport}>Export</Button>
+    <Button variant="outline" onclick={openSave} disabled={nodes.length === 0}>Save Strategy</Button>
+    <Button variant="outline" onclick={openLoad}>Load Strategy</Button>
     <Button variant="outline" onclick={deleteSelected} disabled={!selectedId}>
       Delete
     </Button>
@@ -1032,6 +1104,65 @@
               Import
             </Button>
           </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showSave}
+  <div
+    class="fixed inset-0 z-50 bg-black/40"
+    role="dialog"
+    aria-modal="true"
+    onpointerdown={(e) => { if (e.currentTarget === e.target) showSave = false; }}
+  >
+    <div class="mx-auto mt-32 w-[min(480px,calc(100vw-2rem))] rounded-lg border bg-background shadow-lg">
+      <div class="flex items-center justify-between border-b px-4 py-3">
+        <div class="font-semibold">Save Strategy</div>
+        <button class="rounded-md px-2 py-1 text-sm hover:bg-accent" type="button" onclick={() => showSave = false}>Close</button>
+      </div>
+      <div class="p-4 space-y-3">
+        <div class="space-y-1">
+          <Label for="strategyName">Strategy name</Label>
+          <Input id="strategyName" bind:value={saveName} placeholder="My DCA Strategy" />
+        </div>
+        <div class="flex justify-end gap-2">
+          <Button variant="outline" onclick={() => showSave = false}>Cancel</Button>
+          <Button onclick={saveStrategy} disabled={!saveName.trim()}>Save</Button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showLoad}
+  <div
+    class="fixed inset-0 z-50 bg-black/40"
+    role="dialog"
+    aria-modal="true"
+    onpointerdown={(e) => { if (e.currentTarget === e.target) showLoad = false; }}
+  >
+    <div class="mx-auto mt-32 w-[min(560px,calc(100vw-2rem))] rounded-lg border bg-background shadow-lg">
+      <div class="flex items-center justify-between border-b px-4 py-3">
+        <div class="font-semibold">Load Strategy</div>
+        <button class="rounded-md px-2 py-1 text-sm hover:bg-accent" type="button" onclick={() => showLoad = false}>Close</button>
+      </div>
+      <div class="p-4">
+        {#if savedStrategies.length === 0}
+          <p class="text-sm text-muted-foreground">No saved strategies yet. Build a graph and click Save Strategy.</p>
+        {:else}
+          <ul class="space-y-2">
+            {#each savedStrategies as s (s.id)}
+              <li class="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                <div>
+                  <div class="font-medium">{s.name}</div>
+                  <div class="text-xs text-muted-foreground">{new Date(s.updated_at).toLocaleDateString()}</div>
+                </div>
+                <Button size="sm" onclick={() => loadStrategy(s.id)}>Load</Button>
+              </li>
+            {/each}
+          </ul>
         {/if}
       </div>
     </div>

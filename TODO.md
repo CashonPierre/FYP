@@ -37,7 +37,7 @@ Track what's done and what's left. Update this file as you go.
 - [x] `BacktestRun` model
 - [x] `RunMetrics` model
 - [x] `Trade` model
-- [ ] Write + apply Alembic migration for all models (currently using `create_all` in dev)
+- [x] Write + apply Alembic migration for all models (baseline + new tables migration; fresh setup: `uv run python -m alembic upgrade head`)
 - [ ] Add `EquityCurve` hypertable (post-MVP)
 
 ---
@@ -54,9 +54,9 @@ Track what's done and what's left. Update this file as you go.
 
 ## Strategy API
 
-- [ ] `POST /strategies` — save a strategy graph
-- [ ] `GET /strategies` — list user's saved strategies
-- [ ] `GET /strategies/{id}` — get a single strategy
+- [x] `POST /strategies` — save a strategy graph
+- [x] `GET /strategies` — list user's saved strategies
+- [x] `GET /strategies/{id}` — get a single strategy
 
 ---
 
@@ -107,10 +107,10 @@ Track what's done and what's left. Update this file as you go.
 - [x] Polls `GET /{id}/status` every 2s until completed/failed
 - [x] Fetches and renders real metrics + OHLC + trades from API
 - [x] Legacy mock path preserved for `mock_*` run IDs
-- [ ] **MOCKED: "Running (mock)"** label on progress card — minor label cleanup
-- [ ] **MOCKED: "From sessionStorage (mock)"** label on Run Config card — minor label cleanup
+- [x] **MOCKED: "Running (mock)"** label on progress card — fixed: now shows real status
+- [x] **MOCKED: "From sessionStorage (mock)"** label on Run Config card — removed
 - [ ] Equity curve is always empty (engine doesn't emit equity snapshots yet)
-- [ ] Failed state — show error message from API instead of stuck progress bar
+- [x] Failed state — shows error card with message from API
 - [ ] Trades table (sortable, filterable) — currently only shown as chart markers
 
 ---
@@ -125,7 +125,7 @@ Track what's done and what's left. Update this file as you go.
 
 ## Frontend — Other
 
-- [ ] Landing page at `/` (currently Svelte default placeholder)
+- [x] Landing page at `/` — hero, feature strip, nav with login/signup buttons
 - [ ] Auth guard for `/app/*` routes (redirect to `/login` if no token in localStorage)
 
 ---

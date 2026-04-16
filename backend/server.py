@@ -10,6 +10,7 @@ from middlewares import LoggingMiddleware
 from api.auth import auth_router
 from api.market import market_router
 from api.backtests import backtest_router
+from api.strategies import strategy_router
 from app_common.exception_handlers import app_error_handler
 from app_common.exceptions import AppError
 
@@ -34,6 +35,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(router=auth_router)
     app.include_router(router=market_router)
     app.include_router(router=backtest_router)
+    app.include_router(router=strategy_router)
 
 
 def register_exception_handler(app: FastAPI) -> None:
