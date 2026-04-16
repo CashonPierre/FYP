@@ -786,6 +786,8 @@
     selectedId = null;
     pendingSourceId = null;
     pendingSourceHandle = null;
+    loadedStrategyId = null;
+    loadedStrategyName = '';
     resetView();
 
     if (settings) {
@@ -856,9 +858,11 @@
   let showLoad = $state(false);
   let saveName = $state('');
   let savedStrategies = $state<{ id: string; name: string; updated_at: string }[]>([]);
+  let loadedStrategyId = $state<string | null>(null);
+  let loadedStrategyName = $state('');
 
   const openSave = () => {
-    saveName = '';
+    saveName = loadedStrategyId ? loadedStrategyName : '';
     showSave = true;
     showLoad = false;
     showExport = false;
@@ -890,14 +894,27 @@
     if (!token) { toast.error('Not logged in'); goto('/login'); return; }
 
     const payload = buildExportPayload();
+    const name = saveName.trim();
     try {
-      const res = await fetch(`${BACKEND}/strategies`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: saveName.trim(), graph_json: payload }),
-      });
+      let res: Response;
+      if (loadedStrategyId) {
+        res = await fetch(`${BACKEND}/strategies/${loadedStrategyId}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ name, graph_json: payload }),
+        });
+      } else {
+        res = await fetch(`${BACKEND}/strategies`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ name, graph_json: payload }),
+        });
+      }
       if (!res.ok) { toast.error('Save failed'); return; }
-      toast.success(`Strategy "${saveName.trim()}" saved`);
+      const saved = await res.json() as { id: string; name: string };
+      loadedStrategyId = saved.id;
+      loadedStrategyName = saved.name;
+      toast.success(`Strategy "${name}" saved`);
       showSave = false;
     } catch {
       toast.error('Could not reach backend');
@@ -912,8 +929,10 @@
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) { toast.error('Could not load strategy'); return; }
-      const data = await res.json() as { graph_json: { version: number; settings: Record<string, unknown>; graph: { nodes: unknown[]; edges: unknown[] } } };
+      const data = await res.json() as { id: string; name: string; graph_json: { version: number; settings: Record<string, unknown>; graph: { nodes: unknown[]; edges: unknown[] } } };
       applyImportedPayload(data.graph_json);
+      loadedStrategyId = data.id;
+      loadedStrategyName = data.name;
       showLoad = false;
       toast.success('Strategy loaded');
     } catch {
@@ -1132,13 +1151,16 @@
         <button class="rounded-md px-2 py-1 text-sm hover:bg-accent" type="button" onclick={() => showSave = false}>Close</button>
       </div>
       <div class="p-4 space-y-3">
+        {#if loadedStrategyId}
+          <p class="text-sm text-muted-foreground">Updating existing strategy. Rename below or keep the current name.</p>
+        {/if}
         <div class="space-y-1">
           <Label for="strategyName">Strategy name</Label>
           <Input id="strategyName" bind:value={saveName} placeholder="My DCA Strategy" />
         </div>
         <div class="flex justify-end gap-2">
           <Button variant="outline" onclick={() => showSave = false}>Cancel</Button>
-          <Button onclick={saveStrategy} disabled={!saveName.trim()}>Save</Button>
+          <Button onclick={saveStrategy} disabled={!saveName.trim()}>{loadedStrategyId ? 'Update' : 'Save'}</Button>
         </div>
       </div>
     </div>
