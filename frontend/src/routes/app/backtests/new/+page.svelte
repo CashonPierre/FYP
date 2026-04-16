@@ -565,7 +565,7 @@
 
     nodes = [
       { id: onBarId, type: 'OnBar', x: 60, y: 100, label: 'OnBar', params: { timeframe: '1D' } },
-      { id: buyId, type: 'Buy', x: 340, y: 100, label: 'Buy', params: {} },
+      { id: buyId, type: 'Buy', x: 340, y: 100, label: 'Buy', params: { amount: 10 } },
     ];
 
     edges = [
@@ -1594,6 +1594,22 @@
               value={String(selected.params.timeframe ?? '1D')}
               oninput={(e) =>
                 updateNodeParam(selected.id, 'timeframe', (e.currentTarget as HTMLInputElement).value)
+              }
+            />
+          </div>
+        {/if}
+
+        {#if selected.type === 'Buy'}
+          <div class="space-y-2">
+            <Label for="buyAmount">Amount (units)</Label>
+            <Input
+              id="buyAmount"
+              type="number"
+              min="0.01"
+              step="1"
+              value={String(selected.params.amount ?? 10)}
+              oninput={(e) =>
+                updateNodeParam(selected.id, 'amount', Number((e.currentTarget as HTMLInputElement).value))
               }
             />
           </div>
