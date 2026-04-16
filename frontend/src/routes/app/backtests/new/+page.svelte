@@ -1165,7 +1165,7 @@
         </div>
         <div class="flex justify-end gap-2">
           <Button variant="outline" onclick={() => showSave = false}>Cancel</Button>
-          <Button onclick={saveStrategy} disabled={!saveName.trim() || isSaving}>{loadedStrategyId ? 'Update' : 'Save'}</Button>
+          <Button onclick={saveStrategy} disabled={!saveName.trim() || isSaving}>{isSaving ? 'Saving…' : loadedStrategyId ? 'Update' : 'Save'}</Button>
         </div>
       </div>
     </div>
