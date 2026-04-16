@@ -14,7 +14,7 @@ from api.auth.schemas import CurrentUser
 from api.auth.repositories import get_user_by_email
 from app_common.exceptions import NotFoundError
 from .schemas import StrategyCreate, StrategyItem, StrategyDetail
-from .repositories import create_strategy, get_strategies_by_user, get_strategy_by_id
+from .repositories import create_strategy, get_strategies_by_user, get_strategy_by_id, update_strategy
 
 strategy_router = APIRouter(prefix="/strategies", tags=["Strategy endpoints"])
 
@@ -87,3 +87,32 @@ def get_strategy(
     created_at=strategy.created_at,
     updated_at=strategy.updated_at,
   )
+
+
+@strategy_router.put(
+  path="/{strategy_id}",
+  response_model=StrategyItem,
+  status_code=status.HTTP_200_OK,
+)
+def overwrite_strategy(
+  strategy_id: uuid.UUID,
+  payload: StrategyCreate,
+  current_user: CurrentUser = Depends(get_current_user),
+  session: Session = Depends(get_session),
+) -> StrategyItem:
+  """Overwrite an existing strategy's name and graph."""
+  user = get_user_by_email(session=session, email=current_user.email)
+  if not user:
+    raise NotFoundError(message="User not found")
+
+  strategy: Strategy | None = get_strategy_by_id(session=session, strategy_id=strategy_id)
+  if not strategy or strategy.user_id != user.id:
+    raise NotFoundError(message="Strategy not found")
+
+  updated = update_strategy(
+    session=session,
+    strategy=strategy,
+    name=payload.name,
+    graph_json=payload.graph_json,
+  )
+  return StrategyItem.model_validate(updated)

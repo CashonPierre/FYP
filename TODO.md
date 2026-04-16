@@ -57,7 +57,7 @@ Track what's done and what's left. Update this file as you go.
 - [x] `POST /strategies` — save a strategy graph
 - [x] `GET /strategies` — list user's saved strategies
 - [x] `GET /strategies/{id}` — get a single strategy
-- [ ] `PUT /strategies/{id}` — overwrite existing strategy (currently POST always creates a new one, duplicates accumulate)
+- [x] `PUT /strategies/{id}` — overwrite existing strategy
 
 ---
 
@@ -118,8 +118,8 @@ Track what's done and what's left. Update this file as you go.
 
 ## Frontend — History Page (`/app/backtests`)
 
-- [ ] List user's backtest runs (date, symbol, status, total return)
-- [ ] Link to results page per run
+- [x] List user's backtest runs (date, symbol, status, total return)
+- [x] Link to results page per run
 - [ ] Delete run action (optional)
 
 ---
@@ -127,7 +127,7 @@ Track what's done and what's left. Update this file as you go.
 ## Frontend — Other
 
 - [x] Landing page at `/` — hero, feature strip, nav with login/signup buttons
-- [ ] Auth guard for `/app/*` routes (redirect to `/login` if no token in localStorage)
+- [x] Auth guard for `/app/*` routes (redirect to `/login` if no token in localStorage)
 
 ---
 

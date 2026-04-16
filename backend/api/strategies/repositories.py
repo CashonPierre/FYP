@@ -1,6 +1,7 @@
 # STL
 import uuid
 import json
+from datetime import datetime, timezone
 
 # External
 from sqlalchemy.orm import Session
@@ -38,3 +39,16 @@ def get_strategies_by_user(session: Session, user_id: uuid.UUID) -> list[Strateg
 def get_strategy_by_id(session: Session, strategy_id: uuid.UUID) -> Strategy | None:
   statement = select(Strategy).where(Strategy.id == strategy_id)
   return session.execute(statement).scalar_one_or_none()
+
+
+def update_strategy(
+  session: Session,
+  strategy: Strategy,
+  name: str,
+  graph_json: dict,
+) -> Strategy:
+  strategy.name = name
+  strategy.graph_json = json.dumps(graph_json)
+  strategy.updated_at = datetime.now(timezone.utc)
+  session.flush()
+  return strategy
