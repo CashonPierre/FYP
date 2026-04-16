@@ -860,6 +860,7 @@
   let savedStrategies = $state<{ id: string; name: string; updated_at: string }[]>([]);
   let loadedStrategyId = $state<string | null>(null);
   let loadedStrategyName = $state('');
+  let isSaving = $state(false);
 
   const openSave = () => {
     saveName = loadedStrategyId ? loadedStrategyName : '';
@@ -890,9 +891,11 @@
 
   const saveStrategy = async () => {
     if (!saveName.trim()) { toast.error('Enter a strategy name'); return; }
+    if (isSaving) return;
     const token = localStorage.getItem('token');
     if (!token) { toast.error('Not logged in'); goto('/login'); return; }
 
+    isSaving = true;
     const payload = buildExportPayload();
     const name = saveName.trim();
     try {
@@ -918,6 +921,8 @@
       showSave = false;
     } catch {
       toast.error('Could not reach backend');
+    } finally {
+      isSaving = false;
     }
   };
 
@@ -1160,7 +1165,7 @@
         </div>
         <div class="flex justify-end gap-2">
           <Button variant="outline" onclick={() => showSave = false}>Cancel</Button>
-          <Button onclick={saveStrategy} disabled={!saveName.trim()}>{loadedStrategyId ? 'Update' : 'Save'}</Button>
+          <Button onclick={saveStrategy} disabled={!saveName.trim() || isSaving}>{loadedStrategyId ? 'Update' : 'Save'}</Button>
         </div>
       </div>
     </div>
