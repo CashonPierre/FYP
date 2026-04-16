@@ -8,6 +8,7 @@
   };
 
   export type TradeMarker = {
+    id?: string;
     time: string;
     side: "buy" | "sell";
     price: number;

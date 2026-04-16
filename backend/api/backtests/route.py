@@ -160,6 +160,7 @@ def get_backtest_results(
 
   trade_points = [
     TradePoint(
+      id=str(t.id),
       time=t.time.isoformat(),
       side=t.side,
       price=t.price,

@@ -34,7 +34,7 @@
     summary: ApiSummary | null;
     series: {
       ohlc: { time: string; open: number; high: number; low: number; close: number; volume: number | null }[];
-      trades: { time: string; side: string; price: number; quantity: number; symbol: string }[];
+      trades: { id: string; time: string; side: string; price: number; quantity: number; symbol: string }[];
       equity: { time: string; equity: number }[];
     };
   };
@@ -208,6 +208,7 @@
           close: b.close,
         }));
         trades = data.series.trades.map((t) => ({
+          id: t.id,
           time: t.time,
           side: t.side as 'buy' | 'sell',
           price: t.price,

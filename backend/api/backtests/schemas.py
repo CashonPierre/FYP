@@ -74,6 +74,7 @@ class EquityPoint(BaseModel):
 
 
 class TradePoint(BaseModel):
+  id: str
   time: str
   side: str
   price: float
