@@ -98,13 +98,26 @@ The backend and UI work without this — market data endpoints will just return 
 ## Everyday Dev Workflow
 
 ```bash
-# Terminal 1 — start DB
-docker start timescaledb
+cd ~/FYP
+./dev.sh
+```
 
-# Terminal 2 — start backend
+This starts TimescaleDB + Valkey (Docker), the FastAPI backend, the Celery worker, and the SvelteKit frontend — all in one terminal with colour-coded logs.
+
+Press `Ctrl+C` to stop everything at once.
+
+**If you prefer separate terminals:**
+```bash
+# Terminal 1
+docker start timescaledb valkey
+
+# Terminal 2
 cd ~/FYP/backend && uv run python server.py
 
-# Terminal 3 — start frontend
+# Terminal 3
+cd ~/FYP/backend && uv run celery -A background.celery_app worker --loglevel=info
+
+# Terminal 4
 cd ~/FYP/frontend && pnpm dev
 ```
 
