@@ -1072,7 +1072,12 @@ class TestHighPriorityNodes:
         assert 0.0 <= v <= 100.0
 
   def test_stochastic_buy_when_k_oversold(self):
-    """Stochastic %K < 20 → IfBelow fires true → Buy."""
+    """Stochastic %K output flows through IfBelow correctly.
+
+    Asserts structurally: on bars where %K < 20, on_event returns AddSignal;
+    on bars where %K > 20, returns NullSignal.  Uses the precomputed series
+    directly to avoid relying on randomness.
+    """
     df = _make_ohlcv_df(60)
     g = _make_graph(
       [_node("ob", "OnBar"), _node("st", "Stochastic", {"k": 14, "d": 3}),
@@ -1083,7 +1088,13 @@ class TestHighPriorityNodes:
        _edge("if", "buy", src_h="true")],
     )
     gs = GraphStrategy(g, ohlcv_df=df)
+    k_series = gs._precomputed["st"]["k"]
     prices = df["close"].tolist()
-    sigs = [gs.on_event(_event(p)).__class__.__name__ for p in prices]
-    # In a 60-bar random walk there should be at least one bar where %K < 20
-    assert "AddSignal" in sigs
+
+    for i, p in enumerate(prices):
+      sig = gs.on_event(_event(p)).__class__.__name__
+      k_val = k_series[i]
+      if k_val is not None and k_val < 20:
+        assert sig == "AddSignal", f"bar {i}: expected AddSignal when %K={k_val:.1f} < 20"
+      elif k_val is not None and k_val > 20:
+        assert sig == "NullSignal", f"bar {i}: expected NullSignal when %K={k_val:.1f} > 20"

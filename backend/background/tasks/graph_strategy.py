@@ -222,20 +222,24 @@ class GraphStrategy:
         signal_p = int(_node_param(node, "signal", 9))
         price_series = _resolve_price(nid)
         result = ta.macd(price_series, fast=fast, slow=slow, signal=signal_p)
+        n_bars = len(close)
         if result is None or result.empty:
-          n = len(close)
           self._precomputed[nid] = {
-            "macd": [None] * n,
-            "histogram": [None] * n,
-            "signal": [None] * n,
+            "macd": [None] * n_bars,
+            "histogram": [None] * n_bars,
+            "signal": [None] * n_bars,
           }
         else:
           cols = result.columns.tolist()
-          # Column order: MACD line, histogram, signal
+          # Use prefix matching — column names encode parameters and could
+          # differ across pandas_ta versions; prefix is stable.
+          macd_col   = next((c for c in cols if c.startswith("MACD_")), cols[0])
+          hist_col   = next((c for c in cols if c.startswith("MACDh_")), cols[1])
+          signal_col = next((c for c in cols if c.startswith("MACDs_")), cols[2])
           self._precomputed[nid] = {
-            "macd":      _to_list(result[cols[0]]),
-            "histogram": _to_list(result[cols[1]]),
-            "signal":    _to_list(result[cols[2]]),
+            "macd":      _to_list(result[macd_col]),
+            "histogram": _to_list(result[hist_col]),
+            "signal":    _to_list(result[signal_col]),
           }
 
       elif ntype == "BollingerBands":
@@ -243,18 +247,21 @@ class GraphStrategy:
         std = float(_node_param(node, "std", 2.0))
         price_series = _resolve_price(nid)
         result = ta.bbands(price_series, length=period, std=std)
+        n_bars = len(close)
         if result is None or result.empty:
-          n = len(close)
           self._precomputed[nid] = {
-            "upper": [None] * n, "middle": [None] * n, "lower": [None] * n,
+            "upper": [None] * n_bars, "middle": [None] * n_bars, "lower": [None] * n_bars,
           }
         else:
           cols = result.columns.tolist()
-          # Column order: BBL (lower), BBM (middle), BBU (upper)
+          # BBL_* = lower, BBM_* = middle, BBU_* = upper
+          lower_col  = next((c for c in cols if c.startswith("BBL_")), cols[0])
+          middle_col = next((c for c in cols if c.startswith("BBM_")), cols[1])
+          upper_col  = next((c for c in cols if c.startswith("BBU_")), cols[2])
           self._precomputed[nid] = {
-            "lower":  _to_list(result[cols[0]]),
-            "middle": _to_list(result[cols[1]]),
-            "upper":  _to_list(result[cols[2]]),
+            "lower":  _to_list(result[lower_col]),
+            "middle": _to_list(result[middle_col]),
+            "upper":  _to_list(result[upper_col]),
           }
 
       elif ntype == "ATR":
@@ -268,14 +275,17 @@ class GraphStrategy:
         k = int(_node_param(node, "k", 14))
         d = int(_node_param(node, "d", 3))
         result = ta.stoch(high, low, close, k=k, d=d)
+        n_bars = len(close)
         if result is None or result.empty:
-          n = len(close)
-          self._precomputed[nid] = {"k": [None] * n, "d": [None] * n}
+          self._precomputed[nid] = {"k": [None] * n_bars, "d": [None] * n_bars}
         else:
           cols = result.columns.tolist()
+          # STOCHk_* = %K, STOCHd_* = %D
+          k_col = next((c for c in cols if c.startswith("STOCHk_")), cols[0])
+          d_col = next((c for c in cols if c.startswith("STOCHd_")), cols[1])
           self._precomputed[nid] = {
-            "k": _to_list(result[cols[0]]),
-            "d": _to_list(result[cols[1]]),
+            "k": _to_list(result[k_col]),
+            "d": _to_list(result[d_col]),
           }
 
     logger.debug("GraphStrategy: precomputed %d indicator series (%d bars each)",

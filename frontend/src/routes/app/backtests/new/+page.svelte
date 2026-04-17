@@ -171,9 +171,14 @@
       case 'SMA':
       case 'EMA':
       case 'RSI':
-      case 'ATR':
         return {
           inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
+          outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
+        };
+      case 'ATR':
+        // ATR uses H/L/C from the OHLCV DataFrame — no wirable input needed
+        return {
+          inputs: [],
           outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
         };
       case 'Volume':
@@ -554,6 +559,9 @@
       if (node.type === 'Stochastic') {
         if (!Number(node.params.k) || Number(node.params.k) <= 0) {
           issues.push({ level: 'error', nodeId: node.id, message: 'Stochastic K period must be a positive number.' });
+        }
+        if (!Number(node.params.d) || Number(node.params.d) <= 0) {
+          issues.push({ level: 'error', nodeId: node.id, message: 'Stochastic D period must be a positive number.' });
         }
       }
       if (node.type === 'OnBar' && typeof node.params.timeframe !== 'string') {
