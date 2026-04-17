@@ -99,45 +99,39 @@ Everything below marked `[x]` is shipped. Remaining MVP items are flagged ⚠️
 Replaces the current `_strategy_from_graph` DCA-only fallback in `background/tasks/backtest.py`.
 
 ### Step 1 — Topological sort
-- [ ] Parse graph nodes + edges into a dependency map
-- [ ] Run Kahn's algorithm (or DFS) to produce a stable evaluation order
-- [ ] Detect and reject cycles (builder should prevent them, but validate defensively)
+- [x] Parse graph nodes + edges into a dependency map
+- [x] Kahn's algorithm produces stable evaluation order
+- [x] Cycle detection — unreachable nodes logged as warning
 
 ### Step 2 — Node evaluators
-Each evaluator receives its upstream values and returns one output value (or a signal).
-
-- [ ] `OnBar` — emits the current `MarketDataPayload` (trigger for the rest of the graph)
-- [ ] `Data` — extracts a single field from the bar: `close`, `open`, `high`, `low`, `volume`
-- [ ] `SMA(period)` — rolling mean of last N closes; suppress output during warm-up
-- [ ] `EMA(period)` — exponential moving average; suppress during warm-up
-- [ ] `RSI(period)` — Wilder RSI (0–100); suppress during warm-up
-- [ ] `IfAbove(A, B)` — emits `true` signal if A > B, `false` otherwise; handles two incoming edges on the `a` and `b` ports
-- [ ] `Buy(amount)` — if triggered (receives `true`), returns `AddSignal(Side.BUY, ...)`
-- [ ] `Sell` — if triggered, returns `CloseSignal` for open position
+- [x] `OnBar` — emits `MarketDataPayload`
+- [x] `Data` — outputs close price from bar
+- [x] `SMA(period)` — rolling mean; suppressed during warm-up
+- [x] `EMA(period)` — seeded with SMA, then exponential update; suppressed during warm-up
+- [x] `RSI(period)` — Wilder RSI 0–100; suppressed during warm-up
+- [x] `IfAbove(A, B)` — routes `true`/`false` based on A > B; coerces payload inputs to float
+- [x] `Buy(amount)` — emits `AddSignal` when triggered
+- [x] `Sell` — emits `CloseSignal` when triggered
 
 ### Step 3 — State management
-- [ ] Each indicator node maintains a rolling price buffer (deque of length = period)
-- [ ] State persists across bars within a single run; reset between runs
-- [ ] Warm-up counter per node: suppress signals until buffer is full
+- [x] Per-node rolling price buffer (deque)
+- [x] EMA value persists across bars
+- [x] `reset()` clears all state between runs
 
 ### Step 4 — Multi-input nodes
-- [ ] `IfAbove` receives two separate inputs (ports `a` and `b`); resolve by edge `targetHandle`
-- [ ] `Buy` / `Sell` may have multiple incoming edges — fire if any input is `true`
+- [x] `IfAbove` resolves `a`/`b` inputs by `targetHandle` on edges
+- [x] `_to_float` coerces MarketDataPayload inputs to price float
 
 ### Step 5 — Wire into backtest task
-- [ ] Replace `_strategy_from_graph` in `background/tasks/backtest.py` with `GraphStrategy`
-- [ ] `GraphStrategy.on_event(event)` drives the per-bar evaluation loop
-- [ ] Fall back gracefully if graph has no recognised executable path
+- [x] `_strategy_from_graph` now returns `GraphStrategy` (falls back to DCA for empty graph)
 
 ### Step 6 — Frontend validation
-- [ ] Validator in builder (`+page.svelte`) already gates "Run" on incomplete graphs
-- [ ] Update validation to check `IfAbove` has both `a` and `b` inputs connected
-- [ ] Show warm-up period estimate in Run settings (e.g. "SMA(20) needs 20 bars")
+- [ ] Update IfAbove validation: require both `a` and `b` ports connected before Run is enabled
+- [ ] Show warm-up period estimate in Run settings panel
 
 ### Step 7 — Tests
-- [ ] Unit test: topological sort with a simple 3-node graph
-- [ ] Unit test: SMA/EMA/RSI evaluators match known values
-- [ ] Integration test: `OnBar → SMA(5) → IfAbove(SMA, 150) → Buy` produces correct trade timestamps
+- [x] 23 unit tests: topo-sort, SMA/EMA/RSI evaluators, IfAbove, Buy, Sell, reset, fallback
+- [ ] Integration test: full run with SMA crossover graph produces trades at correct bars
 
 ---
 

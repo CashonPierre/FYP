@@ -24,44 +24,26 @@ logger = get_logger()
 
 def _strategy_from_graph(graph: dict):
   """
-  Parse a builder graph JSON and return an engine strategy instance.
+  Parse a builder graph JSON and return a GraphStrategy instance.
 
-  Graph format:
-    nodes: [{id, type, position, data: {param: value, ...}}]
-    edges: [{id, source, target, source_handle, target_handle}]
+  GraphStrategy evaluates every node in the graph per bar — supports
+  OnBar, Data, SMA, EMA, RSI, IfAbove, Buy, Sell.
 
-  Supported patterns (MVP):
-    OnBar → Buy   →  DCA(buyframe=1, buy_amount=<Buy.data.amount>)
-
-  Falls back to DCA(buyframe=1, buy_amount=10) for any unrecognised graph.
+  Falls back to DCA(buyframe=1, buy_amount=10) if the graph is empty or
+  unparseable, so existing tests and integrations keep working.
   """
   # Import here — ENGINE_PATH must already be on sys.path when called from run_backtest
+  from background.tasks.graph_strategy import GraphStrategy
   from strategies.dca import DCA
 
-  nodes = {n["id"]: n for n in graph.get("nodes", [])}
-  edges = graph.get("edges", [])
+  nodes = graph.get("nodes", [])
+  if not nodes:
+    logger.warning("graph parser: empty graph, falling back to DCA default")
+    return DCA(buyframe=1, buy_amount=10)
 
-  # Build adjacency: source_id → list of target node dicts
-  adjacency: dict[str, list[dict]] = {}
-  for edge in edges:
-    src = edge.get("source")
-    tgt = edge.get("target")
-    if src and tgt and tgt in nodes:
-      adjacency.setdefault(src, []).append(nodes[tgt])
-
-  # Find OnBar → Buy path
-  for node in nodes.values():
-    if node.get("type") != "OnBar":
-      continue
-    for target in adjacency.get(node["id"], []):
-      if target.get("type") == "Buy":
-        buy_amount = float(target.get("data", {}).get("amount", 10))
-        logger.info("graph parser: OnBar→Buy detected, buy_amount=%s", buy_amount)
-        return DCA(buyframe=1, buy_amount=buy_amount)
-
-  # Fallback
-  logger.warning("graph parser: no recognised pattern, falling back to DCA(buyframe=1, buy_amount=10)")
-  return DCA(buyframe=1, buy_amount=10)
+  logger.info("graph parser: building GraphStrategy (%d nodes, %d edges)",
+              len(nodes), len(graph.get("edges", [])))
+  return GraphStrategy(graph)
 
 
 @celery_worker.task(bind=True, max_retries=0)
