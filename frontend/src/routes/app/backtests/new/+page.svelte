@@ -16,6 +16,10 @@
     | 'EMA'
     | 'RSI'
     | 'IfAbove'
+    | 'IfBelow'
+    | 'IfCrossAbove'
+    | 'IfCrossBelow'
+    | 'Constant'
     | 'Buy'
     | 'Sell';
 
@@ -51,12 +55,21 @@
   };
 
   const palette: Array<{ type: NodeType; title: string; hint: string }> = [
+    // Triggers
     { type: 'OnBar', title: 'On Bar', hint: 'Trigger per bar' },
+    // Data sources
     { type: 'Data', title: 'Price Bars', hint: 'OHLCV input' },
+    { type: 'Constant', title: 'Constant', hint: 'Fixed numeric value (e.g. 30, 70)' },
+    // Indicators
     { type: 'SMA', title: 'SMA', hint: 'Simple moving average' },
     { type: 'EMA', title: 'EMA', hint: 'Exponential moving average' },
     { type: 'RSI', title: 'RSI', hint: 'Relative strength index' },
-    { type: 'IfAbove', title: 'If A > B', hint: 'Branch on comparison' },
+    // Conditions
+    { type: 'IfAbove', title: 'If A > B', hint: 'True while A is above B' },
+    { type: 'IfBelow', title: 'If A < B', hint: 'True while A is below B' },
+    { type: 'IfCrossAbove', title: 'Cross Above', hint: 'Fires once when A crosses above B' },
+    { type: 'IfCrossBelow', title: 'Cross Below', hint: 'Fires once when A crosses below B' },
+    // Actions
     { type: 'Buy', title: 'Buy', hint: 'Enter position' },
     { type: 'Sell', title: 'Sell', hint: 'Exit position' },
   ];
@@ -153,6 +166,9 @@
           outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
         };
       case 'IfAbove':
+      case 'IfBelow':
+      case 'IfCrossAbove':
+      case 'IfCrossBelow':
         return {
           inputs: [
             { handle: 'in', label: 'event', type: 'event', y: 18 },
@@ -163,6 +179,11 @@
             { handle: 'true', label: 'true', type: 'event', y: 24 },
             { handle: 'false', label: 'false', type: 'event', y: 52 },
           ],
+        };
+      case 'Constant':
+        return {
+          inputs: [],
+          outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
         };
       case 'Buy':
       case 'Sell':
@@ -222,6 +243,8 @@
         return { period: 14, overbought: 70, oversold: 30 };
       case 'Buy':
         return { amount: 10 };
+      case 'Constant':
+        return { value: 30 };
       case 'Data':
         return { timeframe: '1D' };
       default:
@@ -446,6 +469,14 @@
             message: `Missing input: ${node.label} · ${input.label}`,
           });
         }
+      }
+
+      if (node.type === 'Constant' && (typeof node.params.value !== 'number' || isNaN(Number(node.params.value)))) {
+        issues.push({
+          level: 'error',
+          nodeId: node.id,
+          message: 'Constant value must be a number.',
+        });
       }
 
       if (['SMA', 'EMA', 'RSI'].includes(node.type) && typeof node.params.period !== 'number') {
@@ -745,6 +776,10 @@
       'EMA',
       'RSI',
       'IfAbove',
+      'IfBelow',
+      'IfCrossAbove',
+      'IfCrossBelow',
+      'Constant',
       'Buy',
       'Sell',
     ];
@@ -1649,6 +1684,25 @@
                 updateNodeParam(selected.id, 'timeframe', (e.currentTarget as HTMLInputElement).value)
               }
             />
+          </div>
+        {/if}
+
+        {#if selected.type === 'Constant'}
+          <div class="space-y-2">
+            <Label for="constValue">Value</Label>
+            <Input
+              id="constValue"
+              type="number"
+              step="any"
+              value={String(selected.params.value ?? 30)}
+              oninput={(e) => {
+                const v = parseFloat((e.currentTarget as HTMLInputElement).value);
+                if (!isNaN(v)) updateNodeParam(selected.id, 'value', v);
+              }}
+            />
+            <p class="text-xs text-muted-foreground">
+              Common values: 30 (RSI oversold), 70 (RSI overbought), 50 (midline), 200 (MA period)
+            </p>
           </div>
         {/if}
 

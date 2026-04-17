@@ -87,6 +87,8 @@ class GraphStrategy:
     self._ema_values: dict[str, float | None] = {}  # node_id → current EMA
     # Wilder RSI smoothed state: (avg_gain, avg_loss) seeded after first period bars
     self._rsi_state: dict[str, tuple[float, float] | None] = {}
+    # Crossover state: previous bar's (a, b) values for IfCrossAbove / IfCrossBelow
+    self._cross_prev: dict[str, tuple[float | None, float | None]] = {}
 
   # ------------------------------------------------------------------
   # Topological sort (Kahn's algorithm)
@@ -186,11 +188,8 @@ class GraphStrategy:
       # ── IfAbove ────────────────────────────────────────────────────
       elif ntype == "IfAbove":
         trigger = self._upstream(outputs, nid, "in")
-        a_raw = self._upstream(outputs, nid, "a")
-        b_raw = self._upstream(outputs, nid, "b")
-
-        a_val = self._to_float(a_raw, bar)
-        b_val = self._to_float(b_raw, bar)
+        a_val = self._to_float(self._upstream(outputs, nid, "a"), bar)
+        b_val = self._to_float(self._upstream(outputs, nid, "b"), bar)
 
         if trigger is None or a_val is None or b_val is None:
           outputs[nid] = {"true": None, "false": None}
@@ -198,6 +197,43 @@ class GraphStrategy:
           outputs[nid] = {"true": True, "false": None}
         else:
           outputs[nid] = {"true": None, "false": True}
+
+      # ── IfBelow ────────────────────────────────────────────────────
+      elif ntype == "IfBelow":
+        trigger = self._upstream(outputs, nid, "in")
+        a_val = self._to_float(self._upstream(outputs, nid, "a"), bar)
+        b_val = self._to_float(self._upstream(outputs, nid, "b"), bar)
+
+        if trigger is None or a_val is None or b_val is None:
+          outputs[nid] = {"true": None, "false": None}
+        elif a_val < b_val:
+          outputs[nid] = {"true": True, "false": None}
+        else:
+          outputs[nid] = {"true": None, "false": True}
+
+      # ── IfCrossAbove / IfCrossBelow ────────────────────────────────
+      elif ntype in ("IfCrossAbove", "IfCrossBelow"):
+        trigger = self._upstream(outputs, nid, "in")
+        a_val = self._to_float(self._upstream(outputs, nid, "a"), bar)
+        b_val = self._to_float(self._upstream(outputs, nid, "b"), bar)
+
+        prev_a, prev_b = self._cross_prev.get(nid, (None, None))
+        # Update state regardless of trigger (so prev values track every bar)
+        self._cross_prev[nid] = (a_val, b_val)
+
+        if trigger is None or a_val is None or b_val is None or prev_a is None or prev_b is None:
+          outputs[nid] = {"true": None, "false": None}
+        else:
+          if ntype == "IfCrossAbove":
+            crossed = prev_a <= prev_b and a_val > b_val
+          else:
+            crossed = prev_a >= prev_b and a_val < b_val
+          outputs[nid] = {"true": True if crossed else None, "false": None if crossed else True}
+
+      # ── Constant ───────────────────────────────────────────────────
+      elif ntype == "Constant":
+        value = float(_node_param(node, "value", 0))
+        outputs[nid] = {"out": value}
 
       # ── Buy ────────────────────────────────────────────────────────
       elif ntype == "Buy":
@@ -329,4 +365,5 @@ class GraphStrategy:
     self._price_buffers.clear()
     self._ema_values.clear()
     self._rsi_state.clear()
+    self._cross_prev.clear()
     self._in_position = False

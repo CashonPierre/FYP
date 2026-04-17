@@ -174,10 +174,10 @@ Replaces the current `_strategy_from_graph` DCA-only fallback in `background/tas
 **Goal:** Cover all common technical analysis strategies traders use in practice.
 
 ### Critical — unlocks most standard strategies
-- [ ] `IfBelow(A, B)` — routes `true`/`false` based on A < B (mirror of IfAbove). Required for RSI oversold, price below BB lower band, etc.
-- [ ] `IfCrossAbove(A, B)` — fires `true` on the bar where A crosses above B (was below previous bar). Required for all MA crossover and MACD crossover strategies.
-- [ ] `IfCrossBelow(A, B)` — fires `true` on the bar where A crosses below B. Required for death cross, overbought exits.
-- [ ] `Constant(value)` — outputs a user-defined fixed number. Required for comparisons like RSI < 30, price > 200.
+- [x] `IfBelow(A, B)` — routes `true`/`false` based on A < B (mirror of IfAbove). Required for RSI oversold, price below BB lower band, etc.
+- [x] `IfCrossAbove(A, B)` — fires `true` on the bar where A crosses above B (was below previous bar). Required for all MA crossover and MACD crossover strategies.
+- [x] `IfCrossBelow(A, B)` — fires `true` on the bar where A crosses below B. Required for death cross, overbought exits.
+- [x] `Constant(value)` — outputs a user-defined fixed number. Required for comparisons like RSI < 30, price > 200.
 
 ### High — most commonly used indicators
 - [ ] `MACD(fast, slow, signal)` — outputs `macd` line, `signal` line, `histogram`. Most popular trend-following indicator.

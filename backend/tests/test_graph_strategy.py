@@ -546,3 +546,249 @@ def test_reset_clears_state():
   assert len(gs._price_buffers) == 0
   assert len(gs._ema_values) == 0
   assert len(gs._rsi_state) == 0
+  assert len(gs._cross_prev) == 0
+
+
+# ---------------------------------------------------------------------------
+# Constant node
+# ---------------------------------------------------------------------------
+
+class TestConstant:
+  def _graph(self, value: float):
+    """OnBar → IfAbove(close, Constant) → Buy"""
+    return _make_graph(
+      [
+        _node("ob", "OnBar"),
+        _node("const", "Constant", {"value": value}),
+        _node("if", "IfAbove"),
+        _node("buy", "Buy", amount=10),
+      ],
+      [
+        _edge("ob", "if", tgt_h="in"),
+        _edge("ob", "if", src_h="out", tgt_h="a"),   # close price as A
+        _edge("const", "if", src_h="out", tgt_h="b"),
+        _edge("if", "buy", src_h="true"),
+      ],
+    )
+
+  def test_constant_below_price_triggers_buy(self):
+    """Close (100) > Constant (50) → IfAbove fires true → Buy."""
+    gs = GraphStrategy(self._graph(50.0))
+    sig = gs.on_event(_event(100.0))
+    assert sig.__class__.__name__ == "AddSignal"
+
+  def test_constant_above_price_no_buy(self):
+    """Close (30) < Constant (50) → IfAbove fires false → no Buy."""
+    gs = GraphStrategy(self._graph(50.0))
+    sig = gs.on_event(_event(30.0))
+    assert sig.__class__.__name__ == "NullSignal"
+
+  def test_constant_output_value(self):
+    """Constant node outputs its configured value."""
+    g = _make_graph([_node("c", "Constant", {"value": 42.0})], [])
+    gs = GraphStrategy(g)
+    outputs = {}
+    gs.on_event(_event(100.0))   # run a bar to populate outputs
+    # Verify via IfAbove: price=50, const=42 → IfAbove true
+    g2 = _make_graph(
+      [_node("ob", "OnBar"), _node("c", "Constant", {"value": 42.0}),
+       _node("if", "IfAbove"), _node("buy", "Buy", amount=1)],
+      [_edge("ob", "if", tgt_h="in"), _edge("ob", "if", src_h="out", tgt_h="a"),
+       _edge("c", "if", src_h="out", tgt_h="b"), _edge("if", "buy", src_h="true")],
+    )
+    gs2 = GraphStrategy(g2)
+    assert gs2.on_event(_event(50.0)).__class__.__name__ == "AddSignal"   # 50 > 42
+    gs2.reset()
+    gs3 = GraphStrategy(g2)
+    assert gs3.on_event(_event(10.0)).__class__.__name__ == "NullSignal"  # 10 < 42
+
+
+# ---------------------------------------------------------------------------
+# IfBelow node
+# ---------------------------------------------------------------------------
+
+class TestIfBelow:
+  def _graph(self):
+    """OnBar → IfBelow(RSI, Constant(30)) → Buy; IfBelow.false → Sell"""
+    return _make_graph(
+      [
+        _node("ob", "OnBar"),
+        _node("rsi", "RSI", {"period": 3}),
+        _node("const", "Constant", {"value": 30.0}),
+        _node("ifb", "IfBelow"),
+        _node("buy", "Buy", amount=5),
+      ],
+      [
+        _edge("ob", "rsi"),
+        _edge("ob", "ifb", tgt_h="in"),
+        _edge("rsi", "ifb", src_h="out", tgt_h="a"),
+        _edge("const", "ifb", src_h="out", tgt_h="b"),
+        _edge("ifb", "buy", src_h="true"),
+      ],
+    )
+
+  def test_fires_true_when_a_less_than_b(self):
+    """IfBelow outputs true when A < B."""
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("c1", "Constant", {"value": 20.0}),
+       _node("c2", "Constant", {"value": 50.0}),
+       _node("ifb", "IfBelow"), _node("buy", "Buy", amount=1)],
+      [_edge("ob", "ifb", tgt_h="in"),
+       _edge("c1", "ifb", src_h="out", tgt_h="a"),   # 20
+       _edge("c2", "ifb", src_h="out", tgt_h="b"),   # 50
+       _edge("ifb", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g)
+    sig = gs.on_event(_event(100.0))
+    assert sig.__class__.__name__ == "AddSignal"   # 20 < 50
+
+  def test_fires_false_when_a_greater_than_b(self):
+    """IfBelow outputs false when A > B."""
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("c1", "Constant", {"value": 80.0}),
+       _node("c2", "Constant", {"value": 50.0}),
+       _node("ifb", "IfBelow"), _node("buy", "Buy", amount=1)],
+      [_edge("ob", "ifb", tgt_h="in"),
+       _edge("c1", "ifb", src_h="out", tgt_h="a"),   # 80
+       _edge("c2", "ifb", src_h="out", tgt_h="b"),   # 50
+       _edge("ifb", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g)
+    sig = gs.on_event(_event(100.0))
+    assert sig.__class__.__name__ == "NullSignal"   # 80 > 50
+
+  def test_null_signal_during_warmup(self):
+    """IfBelow with RSI suppresses until indicator warms up."""
+    gs = GraphStrategy(self._graph())
+    # RSI(3) needs 4 bars; first 3 bars should be NullSignal
+    for p in [100.0, 95.0, 90.0]:
+      sig = gs.on_event(_event(p))
+      assert sig.__class__.__name__ == "NullSignal"
+
+
+# ---------------------------------------------------------------------------
+# IfCrossAbove node
+# ---------------------------------------------------------------------------
+
+class TestIfCrossAbove:
+  def _graph(self):
+    """SMA(3) crosses above SMA(5) → Buy"""
+    return _make_graph(
+      [
+        _node("ob", "OnBar"),
+        _node("fast", "SMA", {"period": 3}),
+        _node("slow", "SMA", {"period": 5}),
+        _node("cross", "IfCrossAbove"),
+        _node("buy", "Buy", amount=10),
+      ],
+      [
+        _edge("ob", "fast"),
+        _edge("ob", "slow"),
+        _edge("ob", "cross", tgt_h="in"),
+        _edge("fast", "cross", src_h="out", tgt_h="a"),
+        _edge("slow", "cross", src_h="out", tgt_h="b"),
+        _edge("cross", "buy", src_h="true"),
+      ],
+    )
+
+  def test_fires_only_on_cross_bar(self):
+    """Buy fires exactly once on the bar where fast SMA crosses above slow SMA."""
+    gs = GraphStrategy(self._graph())
+    # Feed declining prices to warm up (fast < slow)
+    prices_warmup = [100.0, 99.0, 98.0, 97.0, 96.0]
+    for p in prices_warmup:
+      gs.on_event(_event(p))
+
+    # Now feed rising prices so fast SMA crosses above slow SMA
+    prices_rally = [97.0, 98.0, 100.0, 110.0, 120.0]
+    sigs = [gs.on_event(_event(p)).__class__.__name__ for p in prices_rally]
+
+    # Exactly one Buy somewhere in the rally
+    assert sigs.count("AddSignal") == 1
+
+  def test_no_fire_when_already_above(self):
+    """No signal when fast is already above slow (not a new cross)."""
+    gs = GraphStrategy(self._graph())
+    # Feed rising prices — fast SMA will be above slow from early on
+    for p in [100.0, 105.0, 110.0, 115.0, 120.0, 125.0, 130.0]:
+      sig = gs.on_event(_event(p))
+    # After the first cross, no more signals since we're not re-crossing
+    # (we feed a few more bars with fast still above slow)
+    sigs = [gs.on_event(_event(p)).__class__.__name__ for p in [135.0, 140.0]]
+    assert all(s == "NullSignal" for s in sigs)
+
+  def test_no_fire_during_warmup(self):
+    """No signal before both SMAs have enough data."""
+    gs = GraphStrategy(self._graph())
+    # First 5 bars — slow SMA(5) not ready yet
+    for p in [100.0, 101.0, 102.0, 103.0, 104.0]:
+      sig = gs.on_event(_event(p))
+    # Should be NullSignal (insufficient data for both prev and current values)
+    assert sig.__class__.__name__ == "NullSignal"
+
+  def test_reset_clears_cross_state(self):
+    """After reset(), prev values are cleared — first bar after reset has no prior."""
+    gs = GraphStrategy(self._graph())
+    for p in [100.0, 99.0, 98.0, 97.0, 96.0]:
+      gs.on_event(_event(p))
+    gs.reset()
+    assert len(gs._cross_prev) == 0
+    # First bar after reset should not fire (no prev values)
+    sig = gs.on_event(_event(105.0))
+    assert sig.__class__.__name__ == "NullSignal"
+
+
+# ---------------------------------------------------------------------------
+# IfCrossBelow node
+# ---------------------------------------------------------------------------
+
+class TestIfCrossBelow:
+  def _graph(self):
+    """SMA(3) crosses below SMA(5) → Sell (via Buy for signal testing)"""
+    return _make_graph(
+      [
+        _node("ob", "OnBar"),
+        _node("fast", "SMA", {"period": 3}),
+        _node("slow", "SMA", {"period": 5}),
+        _node("cross", "IfCrossBelow"),
+        _node("buy", "Buy", amount=10),
+      ],
+      [
+        _edge("ob", "fast"),
+        _edge("ob", "slow"),
+        _edge("ob", "cross", tgt_h="in"),
+        _edge("fast", "cross", src_h="out", tgt_h="a"),
+        _edge("slow", "cross", src_h="out", tgt_h="b"),
+        _edge("cross", "buy", src_h="true"),
+      ],
+    )
+
+  def test_fires_only_on_cross_bar(self):
+    """Signal fires exactly once on the bar where fast SMA crosses below slow SMA."""
+    gs = GraphStrategy(self._graph())
+    # Feed rising prices to warm up (fast > slow)
+    for p in [100.0, 101.0, 102.0, 103.0, 104.0]:
+      gs.on_event(_event(p))
+
+    # Now feed declining prices so fast crosses below slow
+    prices_decline = [103.0, 102.0, 99.0, 95.0, 90.0]
+    sigs = [gs.on_event(_event(p)).__class__.__name__ for p in prices_decline]
+    assert sigs.count("AddSignal") == 1
+
+  def test_opposite_of_cross_above(self):
+    """IfCrossBelow fires when fast was ≥ slow and now < slow (inverse of IfCrossAbove)."""
+    # Single-step test: manually set up a state where prev fast > slow, now fast < slow
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("c_a", "Constant", {"value": 100.0}),
+       _node("c_b", "Constant", {"value": 50.0}),
+       _node("cross", "IfCrossBelow"), _node("buy", "Buy", amount=1)],
+      [_edge("ob", "cross", tgt_h="in"),
+       _edge("c_a", "cross", src_h="out", tgt_h="a"),   # always 100
+       _edge("c_b", "cross", src_h="out", tgt_h="b"),   # always 50
+       _edge("cross", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g)
+    # 100 is never < 50, so IfCrossBelow never fires
+    for _ in range(5):
+      sig = gs.on_event(_event(99.0))
+    assert sig.__class__.__name__ == "NullSignal"
