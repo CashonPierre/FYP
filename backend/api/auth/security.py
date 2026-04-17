@@ -23,6 +23,10 @@ def generate_verify_url(host_prefix: str, token: str) -> str:
     return verify_url
 
 
+def generate_reset_url(token: str) -> str:
+    return f"{settings.frontend_url}/reset-password?token={token}"
+
+
 def hash_password(password: str) -> str:
     """Hash a password"""
     salt = bcrypt.gensalt()

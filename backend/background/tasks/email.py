@@ -1,7 +1,4 @@
 # STL
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import smtplib
 from typing import cast
 
 # External
@@ -14,27 +11,27 @@ from configs import settings, get_logger
 logger = get_logger()
 
 
+def _send_via_resend(subject: str, to_email: str, body: str) -> None:
+  import resend
+  resend.api_key = settings.resend_api_key
+  resend.Emails.send({
+    "from": settings.resend_from_email,
+    "to": [to_email],
+    "subject": subject,
+    "text": body,
+  })
+
+
 @celery_worker.task()
 def send_email(subject: str, to_email: str, body: str) -> None:
-    # For development: just logger.info to console
-    if settings.debug:
-        logger.info(f"\n EMAIL TO: {to_email}")
-        logger.info(f"SUBJECT: {subject}")
-        logger.info(f"BODY:\n{body}\n")
-        return
+  if settings.debug or not settings.resend_api_key:
+    # Development / no key configured — log to console
+    logger.info("\n EMAIL TO: %s", to_email)
+    logger.info("SUBJECT: %s", subject)
+    logger.info("BODY:\n%s\n", body)
+    return
 
-    # Production: use real SMTP (need an actual email)
-    msg = MIMEMultipart()
-    msg["Subject"] = subject
-    msg["To"] = to_email
-    msg["From"] = settings.smtp_user
-    msg.attach(payload=MIMEText(_text=body, _subtype="plain"))
-
-    with smtplib.SMTP_SSL(
-        host=settings.smtp_host, port=settings.smtp_port
-    ) as server:
-        server.login(user=settings.smtp_user, password=settings.smtp_password)
-        server.send_message(msg=msg)
+  _send_via_resend(subject=subject, to_email=to_email, body=body)
 
 
 send_email_task: Task = cast(Task, send_email)

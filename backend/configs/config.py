@@ -57,7 +57,13 @@ class Settings(BaseSettings):
 
     remember_me_expire_day: int = Field(default=30)
 
+    # Frontend origin — used to build email links (e.g. password reset URL).
+    # Override via FRONTEND_URL env var in production.
+    frontend_url: str = Field(default="http://localhost:5173")
+
     # email
+    resend_api_key: str = Field(default="")
+    resend_from_email: str = Field(default="onboarding@resend.dev")
     smtp_host: str = Field(default="smtp.gmail.com")
     smtp_port: int = Field(default=456)
     smtp_user: str = Field(default="test@gmail.com")
