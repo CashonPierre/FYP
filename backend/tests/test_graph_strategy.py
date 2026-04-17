@@ -584,12 +584,7 @@ class TestConstant:
     assert sig.__class__.__name__ == "NullSignal"
 
   def test_constant_output_value(self):
-    """Constant node outputs its configured value."""
-    g = _make_graph([_node("c", "Constant", {"value": 42.0})], [])
-    gs = GraphStrategy(g)
-    outputs = {}
-    gs.on_event(_event(100.0))   # run a bar to populate outputs
-    # Verify via IfAbove: price=50, const=42 → IfAbove true
+    """Constant node outputs its configured value, verified via IfAbove."""
     g2 = _make_graph(
       [_node("ob", "OnBar"), _node("c", "Constant", {"value": 42.0}),
        _node("if", "IfAbove"), _node("buy", "Buy", amount=1)],

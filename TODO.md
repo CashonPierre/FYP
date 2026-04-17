@@ -362,7 +362,7 @@ Replaces the current `_strategy_from_graph` DCA-only fallback in `background/tas
 
 - [x] 16 fast integration tests (SQLite, no Docker) — `uv run pytest tests/`
 - [x] 3 e2e tests (real DB + Valkey + Celery worker) — `uv run pytest tests/test_e2e.py -m e2e`
-- [x] 46 unit tests for GraphStrategy (topo-sort, SMA/EMA/RSI, IfAbove, Buy, Sell, position guard, reset, fallback)
+- [x] 42 unit tests for GraphStrategy (topo-sort, SMA/EMA/RSI, IfAbove/Below/CrossAbove/CrossBelow, Constant, Buy, Sell, position guard, reset, fallback)
 - [ ] v1 — Unit tests for new node evaluators (IfBelow, IfCrossAbove, IfCrossBelow, Constant, MACD, BollingerBands, ATR, Stochastic)
 - [ ] v1 — Integration test: full SMA crossover graph → backtest → trades at correct bars
 - [ ] v1 — Integration test: multi-asset batch run → N results with correct metrics
