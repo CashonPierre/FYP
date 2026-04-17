@@ -20,6 +20,7 @@ dependencies = [
   "resend>=2.29.0",
   "yfinance>=0.2.55",
   "pandas>=2.0.0",
+  "pandas-ta",
 ]
 
 [project.optional-dependencies]

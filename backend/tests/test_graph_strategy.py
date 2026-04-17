@@ -8,6 +8,7 @@ Engine types (AddSignal, NullSignal, etc.) are replaced with lightweight stubs.
 import sys
 import types
 import pytest
+import pandas as pd
 from collections import deque
 from unittest.mock import MagicMock
 
@@ -787,3 +788,122 @@ class TestIfCrossBelow:
     for _ in range(5):
       sig = gs.on_event(_event(99.0))
     assert sig.__class__.__name__ == "NullSignal"
+
+
+# ---------------------------------------------------------------------------
+# Precomputed path (pandas_ta)
+# ---------------------------------------------------------------------------
+
+def _make_df(prices: list[float]) -> pd.DataFrame:
+  """Build a minimal OHLCV DataFrame from a list of close prices."""
+  return pd.DataFrame({
+    "open": prices,
+    "high": prices,
+    "low": prices,
+    "close": prices,
+    "volume": [0] * len(prices),
+  })
+
+
+class TestPrecomputed:
+  """Verify the pandas_ta fast path produces correct signals."""
+
+  def test_sma_precomputed_suppresses_warmup(self):
+    """SMA(3) via precomputed path: first 2 bars are NullSignal, 3rd fires."""
+    prices = [100.0, 101.0, 102.0]
+    df = _make_df(prices)
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("sma", "SMA", {"period": 3}), _node("buy", "Buy")],
+      [_edge("ob", "sma"), _edge("sma", "buy", tgt_h="in")],
+    )
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "sma" in gs._precomputed
+    assert gs._precomputed["sma"][0] is None   # warm-up
+    assert gs._precomputed["sma"][1] is None   # warm-up
+    assert gs._precomputed["sma"][2] is not None  # ready
+
+    sigs = [gs.on_event(_event(p)).__class__.__name__ for p in prices]
+    assert sigs == ["NullSignal", "NullSignal", "AddSignal"]
+
+  def test_sma_precomputed_value_correct(self):
+    """Precomputed SMA(3) value equals manual average of last 3 prices."""
+    prices = [10.0, 20.0, 30.0, 40.0]
+    df = _make_df(prices)
+    g = _make_graph([_node("ob", "OnBar"), _node("sma", "SMA", {"period": 3})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    # SMA(3) at index 2 = (10+20+30)/3 = 20.0; at index 3 = (20+30+40)/3 = 30.0
+    assert gs._precomputed["sma"][2] == pytest.approx(20.0)
+    assert gs._precomputed["sma"][3] == pytest.approx(30.0)
+
+  def test_ema_precomputed_suppresses_warmup(self):
+    """EMA(3) via precomputed path: first 2 bars are NullSignal."""
+    prices = [100.0, 101.0, 102.0, 103.0]
+    df = _make_df(prices)
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("ema", "EMA", {"period": 3}), _node("buy", "Buy")],
+      [_edge("ob", "ema"), _edge("ema", "buy", tgt_h="in")],
+    )
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "ema" in gs._precomputed
+    assert gs._precomputed["ema"][0] is None
+    assert gs._precomputed["ema"][1] is None
+    assert gs._precomputed["ema"][2] is not None
+
+  def test_rsi_precomputed_suppresses_warmup(self):
+    """RSI(3) via precomputed path: bar 0 is None, bars 1+ have values."""
+    prices = [100.0, 101.0, 99.0, 102.0, 98.0]
+    df = _make_df(prices)
+    g = _make_graph([_node("ob", "OnBar"), _node("rsi", "RSI", {"period": 3})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "rsi" in gs._precomputed
+    # pandas_ta RSI(3): first bar is NaN (no prior price for delta); rest computed
+    assert gs._precomputed["rsi"][0] is None
+    assert all(v is not None for v in gs._precomputed["rsi"][1:])
+
+  def test_precomputed_matches_rolling_sma(self):
+    """Precomputed SMA produces same buy-signal sequence as rolling-buffer path."""
+    prices = [100.0, 101.0, 102.0, 99.0, 98.0, 103.0]
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("sma", "SMA", {"period": 3}), _node("buy", "Buy")],
+      [_edge("ob", "sma"), _edge("sma", "buy", tgt_h="in")],
+    )
+    # Rolling path (no df)
+    gs_rolling = GraphStrategy(g)
+    sigs_rolling = [gs_rolling.on_event(_event(p)).__class__.__name__ for p in prices]
+
+    # Precomputed path
+    gs_pre = GraphStrategy(g, ohlcv_df=_make_df(prices))
+    sigs_pre = [gs_pre.on_event(_event(p)).__class__.__name__ for p in prices]
+
+    assert sigs_rolling == sigs_pre
+
+  def test_bar_idx_increments_correctly(self):
+    """_bar_idx starts at -1 and increments to 0 on first on_event call."""
+    g = _make_graph([_node("ob", "OnBar"), _node("buy", "Buy")], [_edge("ob", "buy")])
+    gs = GraphStrategy(g, ohlcv_df=_make_df([100.0, 101.0]))
+    assert gs._bar_idx == -1
+    gs.on_event(_event(100.0))
+    assert gs._bar_idx == 0
+    gs.on_event(_event(101.0))
+    assert gs._bar_idx == 1
+
+  def test_reset_resets_bar_idx(self):
+    """reset() resets _bar_idx to -1 so replay starts from position 0."""
+    g = _make_graph([_node("ob", "OnBar"), _node("buy", "Buy")], [_edge("ob", "buy")])
+    gs = GraphStrategy(g, ohlcv_df=_make_df([100.0, 101.0, 102.0]))
+    for p in [100.0, 101.0]:
+      gs.on_event(_event(p))
+    assert gs._bar_idx == 1
+    gs.reset()
+    assert gs._bar_idx == -1
+    # Precomputed series must survive reset
+    assert "buy" not in gs._precomputed  # Buy has no precomputed — only indicators do
+
+  def test_precomputed_series_survives_reset(self):
+    """_precomputed is not cleared on reset — no need to rebuild from df."""
+    prices = [10.0, 20.0, 30.0, 40.0]
+    g = _make_graph([_node("ob", "OnBar"), _node("sma", "SMA", {"period": 3})], [])
+    gs = GraphStrategy(g, ohlcv_df=_make_df(prices))
+    pre_reset = gs._precomputed["sma"].copy()
+    gs.reset()
+    assert gs._precomputed["sma"] == pre_reset

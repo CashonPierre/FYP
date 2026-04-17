@@ -22,17 +22,17 @@ ENGINE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'trading
 logger = get_logger()
 
 
-def _strategy_from_graph(graph: dict):
+def _strategy_from_graph(graph: dict, ohlcv_df=None):
   """
   Parse a builder graph JSON and return a GraphStrategy instance.
 
-  GraphStrategy evaluates every node in the graph per bar — supports
-  OnBar, Data, SMA, EMA, RSI, IfAbove, Buy, Sell.
+  When ohlcv_df is provided (a pandas DataFrame with open/high/low/close/volume
+  columns), indicator series are precomputed with pandas_ta upfront so that
+  on_event performs O(1) lookups instead of incremental rolling calculations.
 
   Falls back to DCA(buyframe=1, buy_amount=10) if the graph is empty or
   unparseable, so existing tests and integrations keep working.
   """
-  # Import here — ENGINE_PATH must already be on sys.path when called from run_backtest
   from background.tasks.graph_strategy import GraphStrategy
   from strategies.dca import DCA
 
@@ -41,9 +41,9 @@ def _strategy_from_graph(graph: dict):
     logger.warning("graph parser: empty graph, falling back to DCA default")
     return DCA(buyframe=1, buy_amount=10)
 
-  logger.info("graph parser: building GraphStrategy (%d nodes, %d edges)",
-              len(nodes), len(graph.get("edges", [])))
-  return GraphStrategy(graph)
+  logger.info("graph parser: building GraphStrategy (%d nodes, %d edges, precompute=%s)",
+              len(nodes), len(graph.get("edges", [])), ohlcv_df is not None)
+  return GraphStrategy(graph, ohlcv_df=ohlcv_df)
 
 
 @celery_worker.task(bind=True, max_retries=0)
@@ -106,7 +106,18 @@ def run_backtest(self: Task, run_id: str) -> None:
     engine = Engine(initial_cash=initial_capital)
 
     graph = settings.get("graph", {})
-    strategy = _strategy_from_graph(graph)
+
+    # Build a DataFrame so GraphStrategy can precompute indicators with pandas_ta
+    import pandas as pd
+    ohlcv_df = pd.DataFrame({
+      "open":   [b.open for b in bars],
+      "high":   [b.high for b in bars],
+      "low":    [b.low for b in bars],
+      "close":  [b.close for b in bars],
+      "volume": [b.volume or 0 for b in bars],
+    })
+
+    strategy = _strategy_from_graph(graph, ohlcv_df=ohlcv_df)
     engine.add_strategy(strategy)
 
     # Push market data events
