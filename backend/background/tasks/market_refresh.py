@@ -24,6 +24,7 @@ from typing import Any
 
 from celery import Task, group
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from background.celery_app import celery_worker
 from configs import get_logger
@@ -114,7 +115,8 @@ def fetch_and_upsert(
 
         # --- Upsert rows ---
         rows_upserted = 0
-        dialect = session.get_bind().dialect.name
+        # SA 2.0: use session.connection() to detect dialect (get_bind() removed)
+        dialect = session.connection().dialect.name
 
         for ts, row in df.iterrows():
             # yfinance returns tz-aware timestamps; normalise to UTC midnight for daily
@@ -137,7 +139,6 @@ def fetch_and_upsert(
 
             if dialect == "postgresql":
                 # Atomic upsert — safe under concurrent refresh workers for the same symbol
-                from sqlalchemy.dialects.postgresql import insert as pg_insert
                 stmt = pg_insert(OhlcBar).values(**bar_data)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["symbol", "timeframe", "time"],
