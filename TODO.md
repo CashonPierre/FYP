@@ -126,11 +126,12 @@ Replaces the current `_strategy_from_graph` DCA-only fallback in `background/tas
 - [x] `_strategy_from_graph` now returns `GraphStrategy` (falls back to DCA for empty graph)
 
 ### Step 6 — Frontend validation
-- [ ] Update IfAbove validation: require both `a` and `b` ports connected before Run is enabled
-- [ ] Show warm-up period estimate in Run settings panel
+- [x] `IfAbove` `a`/`b` ports: already required by node spec — existing loop catches missing connections
+- [x] RSI period validation added (was only SMA/EMA before)
+- [x] Warm-up period estimate shown below date inputs when indicator nodes are present
 
 ### Step 7 — Tests
-- [x] 23 unit tests: topo-sort, SMA/EMA/RSI evaluators, IfAbove, Buy, Sell, reset, fallback
+- [x] 46 unit tests: topo-sort, SMA/EMA/RSI evaluators, IfAbove, Buy, Sell, position guard, reset, fallback
 - [ ] Integration test: full run with SMA crossover graph produces trades at correct bars
 
 ---

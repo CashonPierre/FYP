@@ -448,14 +448,14 @@
         }
       }
 
-      if ((node.type === 'SMA' || node.type === 'EMA') && typeof node.params.period !== 'number') {
+      if (['SMA', 'EMA', 'RSI'].includes(node.type) && typeof node.params.period !== 'number') {
         issues.push({
           level: 'error',
           nodeId: node.id,
           message: 'Period must be a number.',
         });
       }
-      if ((node.type === 'SMA' || node.type === 'EMA') && Number(node.params.period) <= 0) {
+      if (['SMA', 'EMA', 'RSI'].includes(node.type) && Number(node.params.period) <= 0) {
         issues.push({
           level: 'error',
           nodeId: node.id,
@@ -529,6 +529,14 @@
   const issues = $derived(validate(nodes, edges));
   const errors = $derived(issues.filter((i) => i.level === 'error'));
   const hasErrors = $derived(errors.length > 0);
+
+  // Maximum warm-up bars required by any indicator node in the graph.
+  // SMA/EMA/RSI need `period` bars before they can produce a value.
+  const maxWarmupBars = $derived(
+    nodes
+      .filter((n) => ['SMA', 'EMA', 'RSI'].includes(n.type))
+      .reduce((max, n) => Math.max(max, Number(n.params.period) || 0), 0)
+  );
 
   const issueForSelected = $derived(
     selectedId ? issues.filter((i) => i.nodeId === selectedId) : []
@@ -1053,6 +1061,12 @@
         Clear dates
       </button>
     </div>
+    {#if maxWarmupBars > 0}
+      <div class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+        Warm-up: this strategy needs at least {maxWarmupBars} bars before producing signals.
+        Make sure your date range is long enough.
+      </div>
+    {/if}
   </div>
 
   <div class="flex items-center gap-2">
