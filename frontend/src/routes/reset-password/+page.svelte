@@ -75,7 +75,7 @@
         </Card.Description>
       </Card.Header>
 
-      <Card.CardContent class="space-y-6">
+      <Card.Content class="space-y-6">
         {#if !token}
           <p class="text-sm text-destructive text-center">
             Invalid reset link. Please request a new one.
@@ -125,7 +125,7 @@
             <Button onclick={() => goto('/login')} class="w-full">Go to Login</Button>
           </div>
         {/if}
-      </Card.CardContent>
+      </Card.Content>
     </Card.Root>
   </div>
 </div>

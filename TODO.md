@@ -22,8 +22,8 @@ Everything below marked `[x]` is shipped. Remaining MVP items are flagged ⚠️
 - [x] Frontend `/signup` wired to backend
 - [x] Signup → login redirect with "verify email" reminder
 - [x] Auth guard for `/app/*` routes (redirect to `/login` if no token)
-- [ ] ⚠️ MVP — **Email delivery via Resend** — replace fake SMTP (`background/tasks/email.py`) with Resend API (free tier, 100/day). Add `RESEND_API_KEY` to `.env`. Without this, email verification silently logs to console only; real signups can't verify.
-- [ ] ⚠️ MVP — **Forget password backend** — UI at `/forget-password` exists; `POST /auth/forgot-password` and `POST /auth/reset-password` endpoints missing. Currently a broken link visible to users.
+- [x] **Email delivery via Resend** — uses Resend SDK when `RESEND_API_KEY` is set; console-log fallback in dev. Set `RESEND_API_KEY` + `RESEND_FROM_EMAIL` in `.env` for production.
+- [x] **Forget password** — `POST /auth/forgot-password` + `POST /auth/reset-password` + frontend `/reset-password` page.
 
 ---
 
