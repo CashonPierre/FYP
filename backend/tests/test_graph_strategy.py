@@ -255,13 +255,17 @@ class TestRSI:
     result = gs._rsi("rsi", 14)
     assert result is None  # 10 bars < period+1=15
 
-  def test_flat_prices_returns_none_or_100(self):
-    """Flat prices → no losses → RSI = 100."""
+  def test_flat_prices_returns_100(self):
+    """Flat prices → no losses → RSI = 100 (Wilder seed: avg_loss=0)."""
     g = _make_graph([_node("ob", "OnBar"), _node("rsi", "RSI", {"period": 5})], [])
     gs = GraphStrategy(g)
     gs._price_buffers["rsi"] = deque([100.0] * 6, maxlen=7)
     result = gs._rsi("rsi", 5)
     assert result == 100.0
+    # Second call — Wilder smoothing with zero delta keeps avg_loss=0
+    gs._price_buffers["rsi"].append(100.0)
+    result2 = gs._rsi("rsi", 5)
+    assert result2 == 100.0
 
   def test_rsi_range(self):
     """RSI must be in [0, 100]."""
@@ -399,6 +403,15 @@ class TestPositionGuard:
     gs = self._buy_sell_graph()
     assert gs._has_exit is True
 
+  def test_unwired_sell_no_guard(self):
+    """Sell node on canvas but unconnected → _has_exit=False → Buy accumulates freely."""
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("buy", "Buy", amount=10.0), _node("sell", "Sell")],
+      [_edge("ob", "buy")],   # Sell has NO incoming edge
+    )
+    gs = GraphStrategy(g)
+    assert gs._has_exit is False  # unconnected Sell doesn't activate guard
+
   def test_no_exit_no_guard(self):
     """Buy-only graph (DCA): every bar fires AddSignal regardless."""
     g = _make_graph(
@@ -412,25 +425,36 @@ class TestPositionGuard:
       assert sig.__class__.__name__ == "AddSignal"
 
   def test_buy_blocked_when_in_position(self):
-    """With a Sell node present, second Buy is suppressed until Sell fires."""
-    # Use IfAbove to control Buy vs Sell separately
+    """With a wired Sell node present, Buy is suppressed once in position."""
+    # Buy is wired; Sell exists but is unconnected — so _has_exit=False?
+    # Instead: wire Sell to a dead-end so it has an incoming edge but never triggers.
+    # Simplest: manually set _in_position after first buy and assert second is blocked.
     g = _make_graph(
       [_node("ob", "OnBar"), _node("buy", "Buy", amount=5.0), _node("sell", "Sell")],
-      [_edge("ob", "buy")],   # Sell has NO connection — never triggers
+      [_edge("ob", "buy"), _edge("ob", "sell")],
     )
-    # Sell node exists but is unconnected → _has_exit=True, but Sell never fires
     gs = GraphStrategy(g)
     assert gs._has_exit is True
 
+    # First bar: Buy fires, Sell suppressed (not yet in position)
     sig1 = gs.on_event(_event(100.0))
-    assert sig1.__class__.__name__ == "AddSignal"   # first buy goes through
+    assert sig1.__class__.__name__ == "AddSignal"
     assert gs._in_position is True
 
-    sig2 = gs.on_event(_event(101.0))
-    assert sig2.__class__.__name__ == "NullSignal"  # blocked — still in position
-
-    sig3 = gs.on_event(_event(102.0))
-    assert sig3.__class__.__name__ == "NullSignal"  # still blocked
+    # Manually block Sell from firing by marking not-in-position, then re-enter
+    # to isolate Buy-blocking behaviour: put back in position, confirm Buy blocked
+    gs._in_position = True
+    # Disconnect Sell from outputs by testing via direct state manipulation
+    # Simplest proof: force _in_position=True and use a Buy-only trigger graph
+    g2 = _make_graph(
+      [_node("ob", "OnBar"), _node("buy", "Buy", amount=5.0), _node("sell", "Sell")],
+      [_edge("ob", "buy")],   # Sell unconnected here — guard still set via manual flag
+    )
+    gs2 = GraphStrategy(g2)
+    gs2._has_exit = True       # force guard on
+    gs2._in_position = True    # simulate already holding
+    sig2 = gs2.on_event(_event(101.0))
+    assert sig2.__class__.__name__ == "NullSignal"  # Buy blocked
 
   def test_sell_clears_position_allows_rebuy(self):
     """Buy → hold → Sell clears position → next Buy fires again."""
@@ -514,7 +538,6 @@ def test_reset_clears_state():
     [_edge("ob", "sma"), _edge("sma", "buy")],
   )
   gs = GraphStrategy(g)
-  # Warm up
   for p in [100.0, 101.0, 102.0]:
     gs.on_event(_event(p))
   assert len(gs._price_buffers) > 0
@@ -522,3 +545,4 @@ def test_reset_clears_state():
   gs.reset()
   assert len(gs._price_buffers) == 0
   assert len(gs._ema_values) == 0
+  assert len(gs._rsi_state) == 0

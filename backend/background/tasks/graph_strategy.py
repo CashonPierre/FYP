@@ -72,17 +72,21 @@ class GraphStrategy:
 
     self._exec_order: list[str] = self._topo_sort()
 
-    # Position guard: if the graph has a Sell node the strategy has an explicit
-    # exit, so we enforce one-position-at-a-time.  Graphs with only a Buy node
-    # (DCA-style) accumulate freely — no guard applied.
-    self._has_exit: bool = any(
-      n.get("type") == "Sell" for n in self._nodes.values()
-    )
+    # Position guard: only apply if a Sell node has at least one incoming edge
+    # (i.e. it is actually wired up and reachable). A Sell node dropped on the
+    # canvas but left unconnected must NOT block Buy signals indefinitely.
+    wired_sell_ids = {
+      tgt for (tgt, _) in self._input_map
+      if self._nodes.get(tgt, {}).get("type") == "Sell"
+    }
+    self._has_exit: bool = bool(wired_sell_ids)
     self._in_position: bool = False
 
     # Indicator state — persists across bars within one run
     self._price_buffers: dict[str, deque] = {}   # node_id → price history
     self._ema_values: dict[str, float | None] = {}  # node_id → current EMA
+    # Wilder RSI smoothed state: (avg_gain, avg_loss) seeded after first period bars
+    self._rsi_state: dict[str, tuple[float, float] | None] = {}
 
   # ------------------------------------------------------------------
   # Topological sort (Kahn's algorithm)
@@ -151,7 +155,7 @@ class GraphStrategy:
       # ── Data ───────────────────────────────────────────────────────
       elif ntype == "Data":
         # Data is a visual reference; output the close price
-        outputs[nid] = {"out": float(bar.Close or bar.price)}
+        outputs[nid] = {"out": float(bar.Close if bar.Close is not None else bar.price)}
 
       # ── SMA / EMA / RSI ────────────────────────────────────────────
       elif ntype in ("SMA", "EMA", "RSI"):
@@ -164,7 +168,7 @@ class GraphStrategy:
         elif isinstance(raw, (int, float)):
           price = float(raw)
         else:
-          price = float(bar.Close or bar.price)  # default to close
+          price = float(bar.Close if bar.Close is not None else bar.price)  # default to close
 
         if nid not in self._price_buffers:
           self._price_buffers[nid] = deque(maxlen=max(period + 1, 2))
@@ -285,15 +289,30 @@ class GraphStrategy:
     return self._ema_values[nid]
 
   def _rsi(self, nid: str, period: int) -> float | None:
+    """Wilder's smoothed RSI — matches TradingView / Bloomberg values."""
     buf = list(self._price_buffers[nid])
     if len(buf) < period + 1:
       return None
 
     deltas = [buf[i] - buf[i - 1] for i in range(1, len(buf))]
-    recent = deltas[-period:]
-    avg_gain = sum(d for d in recent if d > 0) / period
-    avg_loss = sum(-d for d in recent if d < 0) / period
 
+    if self._rsi_state.get(nid) is None:
+      # Seed: simple average of first `period` deltas
+      seed = deltas[:period]
+      avg_gain = sum(d for d in seed if d > 0) / period
+      avg_loss = sum(-d for d in seed if d < 0) / period
+      self._rsi_state[nid] = (avg_gain, avg_loss)
+    else:
+      # Wilder smoothing: prev_avg * (period-1) + current_delta / period
+      prev_gain, prev_loss = self._rsi_state[nid]
+      last = deltas[-1]
+      gain = max(last, 0.0)
+      loss = max(-last, 0.0)
+      avg_gain = (prev_gain * (period - 1) + gain) / period
+      avg_loss = (prev_loss * (period - 1) + loss) / period
+      self._rsi_state[nid] = (avg_gain, avg_loss)
+
+    avg_gain, avg_loss = self._rsi_state[nid]
     if avg_loss == 0:
       return 100.0
     rs = avg_gain / avg_loss
@@ -309,4 +328,5 @@ class GraphStrategy:
   def reset(self) -> None:
     self._price_buffers.clear()
     self._ema_values.clear()
+    self._rsi_state.clear()
     self._in_position = False
