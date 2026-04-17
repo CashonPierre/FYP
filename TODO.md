@@ -32,11 +32,11 @@ Everything below marked `[x]` is shipped. Remaining MVP items are flagged ⚠️
 - [x] `OhlcBar` DB model (TimescaleDB hypertable)
 - [x] `GET /market/ohlc` endpoint (symbol, timeframe, date range)
 - [x] S&P500 OHLC data in DB (619k rows, 2013–2018 daily)
-- [ ] v1 — `scripts/refresh_ohlc.py` — fetch via yfinance for a symbol list or universe name, upsert into `ohlc_bars` with `ON CONFLICT DO UPDATE`
-- [ ] v1 — `POST /market/refresh` — admin-only endpoint to trigger on-demand refresh
-- [ ] v1 — Celery Beat scheduled task — daily auto-refresh for all tracked symbols
+- [x] v1 — `scripts/refresh_ohlc.py` — fetch via yfinance for a symbol list or universe name, upsert into `ohlc_bars` incrementally
+- [x] v1 — `POST /market/refresh` — authenticated endpoint to trigger on-demand refresh (enqueues Celery tasks, returns 202)
+- [x] v1 — Celery Beat scheduled task — daily auto-refresh at 06:00 UTC for all tracked symbols + all universe symbols
 - [ ] v1 — On backtest run: if symbol missing or data stale (> 1 day old), auto-fetch before task runs
-- [ ] v1 — `GET /market/universes` — return available universe names + symbol lists
+- [x] v1 — `GET /market/universes` — returns all universe definitions with symbol lists
 
 ---
 
@@ -119,7 +119,7 @@ Everything below marked `[x]` is shipped. Remaining MVP items are flagged ⚠️
 - [x] Fix `trading_engine/strategies/strategy.py` inconsistent import
 - [x] Celery task feeds OHLC bars to engine as `MarketDataEvent`s and stores results
 - [x] Graph JSON parsed: `OnBar → Buy` pattern → `DCA(buyframe=1, buy_amount=<amount>)`
-- [ ] ⚠️ MVP — Engine PR `Quant-Backtester/trading_engine#1` merged by teammate (fixes JsonMarketDataSource, _realized_pnl, CancelSignal, CloseSignal)
+- [x] Engine PR `Quant-Backtester/trading_engine#1` merged — fixes JsonMarketDataSource, _realized_pnl, CancelSignal, CloseSignal
 - [ ] v1 — `DBMarketDataSource` fully implemented — **teammate**
 - [ ] v1 — Take profit / stop loss configurable per Buy/Sell node in builder UI
 
@@ -188,6 +188,8 @@ Replaces the current `_strategy_from_graph` DCA-only fallback in `background/tas
 ### Medium — broader coverage
 - [ ] `Stochastic(k_period, d_period)` — outputs `%K` and `%D`. Used for overbought/oversold in trending markets.
 - [ ] `VWAP` — Volume Weighted Average Price; outputs intraday mean price. Common institutional benchmark.
+- [ ] `VWAP(period)` — Rolling Volume-Weighted Average Price over N daily bars. Institutional benchmark for entry/exit levels.
+- [ ] `MFI(period)` — Money Flow Index; combines price + volume into 0–100 oscillator. Volume-aware overbought/oversold.
 - [ ] `ADX(period)` — Average Directional Index; outputs trend strength 0–100. Used to filter ranging vs trending markets.
 - [ ] `OBV` — On-Balance Volume; cumulative volume flow. Used to confirm price trend with volume.
 - [ ] `CCI(period)` — Commodity Channel Index; outputs oscillator. Used for overbought/oversold and divergence.
@@ -386,5 +388,4 @@ Replaces the current `_strategy_from_graph` DCA-only fallback in `background/tas
 ## Known Bugs / Issues
 
 - [ ] Engine `pyproject.toml` declares `src/` layout but no `src/` dir — `pip install -e .` broken. **Teammate to fix.**
-- [ ] Engine PR `Quant-Backtester/trading_engine#1` waiting for review. Contains: JsonMarketDataSource base class, _realized_pnl, CancelSignal, CloseSignal fixes.
 - [ ] User router (`backend/api/user/route.py`) is empty — blocked by v1 user profile work.
