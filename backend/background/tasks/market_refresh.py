@@ -115,7 +115,10 @@ def fetch_and_upsert(
 
         # --- Upsert rows ---
         rows_upserted = 0
-        # SA 2.0: use session.connection() to detect dialect (get_bind() removed)
+        # session.connection() detects the actual dialect of this session
+        # (PostgreSQL in production, SQLite in unit tests). The reviewer
+        # suggested db_engine.dialect.name but that always returns
+        # "postgresql" — wrong when tests pass a SQLite session directly.
         dialect = session.connection().dialect.name
 
         for ts, row in df.iterrows():
