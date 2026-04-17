@@ -231,11 +231,15 @@ class GraphStrategy:
           }
         else:
           cols = result.columns.tolist()
-          # Use prefix matching — column names encode parameters and could
-          # differ across pandas_ta versions; prefix is stable.
-          macd_col   = next((c for c in cols if c.startswith("MACD_")), cols[0])
-          hist_col   = next((c for c in cols if c.startswith("MACDh_")), cols[1])
-          signal_col = next((c for c in cols if c.startswith("MACDs_")), cols[2])
+          # Prefix matching — stable across pandas_ta versions that encode
+          # parameters in column names.  Raise on mismatch rather than
+          # silently falling back to a positionally-wrong column.
+          try:
+            macd_col   = next(c for c in cols if c.startswith("MACD_"))
+            hist_col   = next(c for c in cols if c.startswith("MACDh_"))
+            signal_col = next(c for c in cols if c.startswith("MACDs_"))
+          except StopIteration:
+            raise ValueError(f"GraphStrategy: unexpected MACD column names from pandas_ta: {cols}")
           self._precomputed[nid] = {
             "macd":      _to_list(result[macd_col]),
             "histogram": _to_list(result[hist_col]),
@@ -255,9 +259,12 @@ class GraphStrategy:
         else:
           cols = result.columns.tolist()
           # BBL_* = lower, BBM_* = middle, BBU_* = upper
-          lower_col  = next((c for c in cols if c.startswith("BBL_")), cols[0])
-          middle_col = next((c for c in cols if c.startswith("BBM_")), cols[1])
-          upper_col  = next((c for c in cols if c.startswith("BBU_")), cols[2])
+          try:
+            lower_col  = next(c for c in cols if c.startswith("BBL_"))
+            middle_col = next(c for c in cols if c.startswith("BBM_"))
+            upper_col  = next(c for c in cols if c.startswith("BBU_"))
+          except StopIteration:
+            raise ValueError(f"GraphStrategy: unexpected BollingerBands column names from pandas_ta: {cols}")
           self._precomputed[nid] = {
             "lower":  _to_list(result[lower_col]),
             "middle": _to_list(result[middle_col]),
@@ -281,8 +288,11 @@ class GraphStrategy:
         else:
           cols = result.columns.tolist()
           # STOCHk_* = %K, STOCHd_* = %D
-          k_col = next((c for c in cols if c.startswith("STOCHk_")), cols[0])
-          d_col = next((c for c in cols if c.startswith("STOCHd_")), cols[1])
+          try:
+            k_col = next(c for c in cols if c.startswith("STOCHk_"))
+            d_col = next(c for c in cols if c.startswith("STOCHd_"))
+          except StopIteration:
+            raise ValueError(f"GraphStrategy: unexpected Stochastic column names from pandas_ta: {cols}")
           self._precomputed[nid] = {
             "k": _to_list(result[k_col]),
             "d": _to_list(result[d_col]),

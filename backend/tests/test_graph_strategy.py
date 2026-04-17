@@ -1091,6 +1091,11 @@ class TestHighPriorityNodes:
     k_series = gs._precomputed["st"]["k"]
     prices = df["close"].tolist()
 
+    # Verify the fixture actually exercises the oversold branch
+    assert any(v is not None and v < 20 for v in k_series), (
+      "test fixture never produces %K < 20 — increase bars or change seed"
+    )
+
     for i, p in enumerate(prices):
       sig = gs.on_event(_event(p)).__class__.__name__
       k_val = k_series[i]
