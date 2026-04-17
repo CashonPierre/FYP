@@ -535,7 +535,12 @@
   const maxWarmupBars = $derived(
     nodes
       .filter((n) => ['SMA', 'EMA', 'RSI'].includes(n.type))
-      .reduce((max, n) => Math.max(max, Number(n.params.period) || 0), 0)
+      .reduce((max, n) => {
+        const period = Number(n.params.period) || 0;
+        // RSI needs period+1 prices (N changes require N+1 prices)
+        const needed = n.type === 'RSI' ? period + 1 : period;
+        return Math.max(max, needed);
+      }, 0)
   );
 
   const issueForSelected = $derived(
