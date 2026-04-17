@@ -31,7 +31,7 @@ _unit_engine = create_engine(_UNIT_DB_URL, connect_args={"check_same_thread": Fa
 def unit_session():
     """Fresh schema + session per test. Dropped after each test."""
     Base.metadata.create_all(_unit_engine)
-    session = Session(bind=_unit_engine)
+    session = Session(_unit_engine)
     yield session
     session.close()
     Base.metadata.drop_all(_unit_engine)

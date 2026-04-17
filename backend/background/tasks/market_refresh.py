@@ -114,6 +114,8 @@ def fetch_and_upsert(
 
         # --- Upsert rows ---
         rows_upserted = 0
+        dialect = session.get_bind().dialect.name
+
         for ts, row in df.iterrows():
             # yfinance returns tz-aware timestamps; normalise to UTC midnight for daily
             bar_time = ts.to_pydatetime()
@@ -122,7 +124,7 @@ def fetch_and_upsert(
             else:
                 bar_time = bar_time.astimezone(timezone.utc)
 
-            bar = OhlcBar(
+            bar_data = dict(
                 symbol=symbol,
                 timeframe=timeframe,
                 time=bar_time,
@@ -132,7 +134,20 @@ def fetch_and_upsert(
                 close=float(row["Close"]),
                 volume=int(row["Volume"]) if row.get("Volume") is not None else None,
             )
-            session.merge(bar)
+
+            if dialect == "postgresql":
+                # Atomic upsert — safe under concurrent refresh workers for the same symbol
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                stmt = pg_insert(OhlcBar).values(**bar_data)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["symbol", "timeframe", "time"],
+                    set_={k: stmt.excluded[k] for k in ["open", "high", "low", "close", "volume"]},
+                )
+                session.execute(stmt)
+            else:
+                # SQLite fallback (tests only)
+                session.merge(OhlcBar(**bar_data))
+
             rows_upserted += 1
 
         session.commit()

@@ -16,7 +16,7 @@ from .schemas import (
     UniverseOut,
     UniversesResponse,
 )
-from .universes import UNIVERSES, get_universe_symbols
+from .universes import UNIVERSES, get_universe_symbols, list_universes
 
 market_router = APIRouter(prefix="/market", tags=["Market data"])
 
@@ -100,13 +100,7 @@ def get_universes() -> UniversesResponse:
     """Return all available universe definitions with symbol lists."""
     return UniversesResponse(
         universes=[
-            UniverseOut(
-                key=key,
-                name=meta["name"],
-                description=meta["description"],
-                count=len(meta["symbols"]),
-                symbols=meta["symbols"],
-            )
-            for key, meta in UNIVERSES.items()
+            UniverseOut(key=key, **meta)
+            for key, meta in list_universes().items()
         ]
     )
