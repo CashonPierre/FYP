@@ -818,9 +818,9 @@ class TestPrecomputed:
     )
     gs = GraphStrategy(g, ohlcv_df=df)
     assert "sma" in gs._precomputed
-    assert gs._precomputed["sma"][0] is None   # warm-up
-    assert gs._precomputed["sma"][1] is None   # warm-up
-    assert gs._precomputed["sma"][2] is not None  # ready
+    assert gs._precomputed["sma"]["out"][0] is None   # warm-up
+    assert gs._precomputed["sma"]["out"][1] is None   # warm-up
+    assert gs._precomputed["sma"]["out"][2] is not None  # ready
 
     sigs = [gs.on_event(_event(p)).__class__.__name__ for p in prices]
     assert sigs == ["NullSignal", "NullSignal", "AddSignal"]
@@ -832,8 +832,8 @@ class TestPrecomputed:
     g = _make_graph([_node("ob", "OnBar"), _node("sma", "SMA", {"period": 3})], [])
     gs = GraphStrategy(g, ohlcv_df=df)
     # SMA(3) at index 2 = (10+20+30)/3 = 20.0; at index 3 = (20+30+40)/3 = 30.0
-    assert gs._precomputed["sma"][2] == pytest.approx(20.0)
-    assert gs._precomputed["sma"][3] == pytest.approx(30.0)
+    assert gs._precomputed["sma"]["out"][2] == pytest.approx(20.0)
+    assert gs._precomputed["sma"]["out"][3] == pytest.approx(30.0)
 
   def test_ema_precomputed_suppresses_warmup(self):
     """EMA(3) via precomputed path: first 2 bars are NullSignal."""
@@ -845,9 +845,9 @@ class TestPrecomputed:
     )
     gs = GraphStrategy(g, ohlcv_df=df)
     assert "ema" in gs._precomputed
-    assert gs._precomputed["ema"][0] is None
-    assert gs._precomputed["ema"][1] is None
-    assert gs._precomputed["ema"][2] is not None
+    assert gs._precomputed["ema"]["out"][0] is None
+    assert gs._precomputed["ema"]["out"][1] is None
+    assert gs._precomputed["ema"]["out"][2] is not None
 
   def test_rsi_precomputed_suppresses_warmup(self):
     """RSI(3) via precomputed path: bar 0 is None, bars 1+ have values."""
@@ -857,8 +857,8 @@ class TestPrecomputed:
     gs = GraphStrategy(g, ohlcv_df=df)
     assert "rsi" in gs._precomputed
     # pandas_ta RSI(3): first bar is NaN (no prior price for delta); rest computed
-    assert gs._precomputed["rsi"][0] is None
-    assert all(v is not None for v in gs._precomputed["rsi"][1:])
+    assert gs._precomputed["rsi"]["out"][0] is None
+    assert all(v is not None for v in gs._precomputed["rsi"]["out"][1:])
 
   def test_precomputed_matches_rolling_sma(self):
     """Precomputed SMA produces same buy-signal sequence as rolling-buffer path."""
@@ -904,6 +904,186 @@ class TestPrecomputed:
     prices = [10.0, 20.0, 30.0, 40.0]
     g = _make_graph([_node("ob", "OnBar"), _node("sma", "SMA", {"period": 3})], [])
     gs = GraphStrategy(g, ohlcv_df=_make_df(prices))
-    pre_reset = gs._precomputed["sma"].copy()
+    pre_reset = gs._precomputed["sma"]["out"].copy()
     gs.reset()
-    assert gs._precomputed["sma"] == pre_reset
+    assert gs._precomputed["sma"]["out"] == pre_reset
+
+
+# ---------------------------------------------------------------------------
+# High-priority indicator nodes (MACD, BollingerBands, ATR, Volume, Stochastic)
+# ---------------------------------------------------------------------------
+
+def _make_ohlcv_df(n: int = 60, seed: int = 42):
+  """Build a realistic OHLCV DataFrame with n bars (enough for MACD warm-up)."""
+  import numpy as np
+  np.random.seed(seed)
+  close = pd.Series(100.0 + np.cumsum(np.random.randn(n)))
+  high = close + abs(np.random.randn(n)) * 0.5 + 0.5
+  low = close - abs(np.random.randn(n)) * 0.5 - 0.5
+  return pd.DataFrame({
+    "open": close,
+    "high": high,
+    "low": low,
+    "close": close,
+    "volume": np.random.randint(1000, 10000, n),
+  })
+
+
+class TestHighPriorityNodes:
+  """Smoke tests for MACD, BollingerBands, ATR, Volume, Stochastic."""
+
+  def test_macd_precomputed_has_all_handles(self):
+    """MACD node stores macd/signal/histogram series."""
+    df = _make_ohlcv_df(60)
+    g = _make_graph([_node("ob", "OnBar"), _node("m", "MACD", {"fast": 12, "slow": 26, "signal": 9})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "m" in gs._precomputed
+    assert set(gs._precomputed["m"].keys()) == {"macd", "signal", "histogram"}
+    assert len(gs._precomputed["m"]["macd"]) == 60
+
+  def test_macd_warmup_then_fires(self):
+    """MACD(12,26,9) output feeds IfAbove; no signal during warm-up, fires after.
+
+    Uses a monotone uptrend so fast EMA > slow EMA → MACD > 0 after warm-up.
+    """
+    # Linearly rising prices: fast EMA > slow EMA → MACD line > 0
+    n = 60
+    prices_list = [100.0 + i * 0.5 for i in range(n)]
+    df = pd.DataFrame({
+      "open": prices_list, "high": [p + 0.1 for p in prices_list],
+      "low": [p - 0.1 for p in prices_list], "close": prices_list,
+      "volume": [1000] * n,
+    })
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("m", "MACD", {"fast": 12, "slow": 26, "signal": 9}),
+       _node("c", "Constant", {"value": 0}), _node("if", "IfAbove"), _node("buy", "Buy")],
+      [_edge("ob", "if", tgt_h="in"),
+       _edge("m", "if", src_h="macd", tgt_h="a"),
+       _edge("c", "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g, ohlcv_df=df)
+    sigs = [gs.on_event(_event(p)).__class__.__name__ for p in prices_list]
+    # First 25 bars: EMA(26) not ready yet → MACD line is None → NullSignal
+    assert all(s == "NullSignal" for s in sigs[:25])
+    # From bar 25 onward, uptrend → MACD line > 0 → AddSignal fires
+    assert "AddSignal" in sigs[25:]
+
+  def test_bbands_precomputed_has_all_handles(self):
+    """BollingerBands node stores upper/middle/lower series."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("bb", "BollingerBands", {"period": 20, "std": 2.0})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "bb" in gs._precomputed
+    assert set(gs._precomputed["bb"].keys()) == {"upper", "middle", "lower"}
+
+  def test_bbands_upper_gt_lower(self):
+    """BollingerBands: upper > lower for every non-None bar."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("bb", "BollingerBands", {"period": 5, "std": 2.0})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    uppers = gs._precomputed["bb"]["upper"]
+    lowers = gs._precomputed["bb"]["lower"]
+    for u, l in zip(uppers, lowers):
+      if u is not None and l is not None:
+        assert u > l
+
+  def test_atr_precomputed_single_out(self):
+    """ATR node stores a single 'out' series."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("atr", "ATR", {"period": 14})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "atr" in gs._precomputed
+    assert "out" in gs._precomputed["atr"]
+    # ATR values must be non-negative where defined
+    for v in gs._precomputed["atr"]["out"]:
+      if v is not None:
+        assert v >= 0.0
+
+  def test_atr_feeds_ifabove(self):
+    """ATR value flows correctly into IfAbove.a port."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("atr", "ATR", {"period": 5}),
+       _node("c", "Constant", {"value": 0}), _node("if", "IfAbove"), _node("buy", "Buy")],
+      [_edge("ob", "if", tgt_h="in"),
+       _edge("atr", "if", src_h="out", tgt_h="a"),
+       _edge("c", "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g, ohlcv_df=df)
+    prices = df["close"].tolist()
+    sigs = [gs.on_event(_event(p)).__class__.__name__ for p in prices]
+    # ATR > 0 almost always — should fire many AddSignals after warm-up
+    assert "AddSignal" in sigs
+
+  def test_volume_no_df_needed(self):
+    """Volume node reads bar.volume directly — no DataFrame required."""
+    from events.payloads.market_payload import MarketDataPayload
+    from events.event import MarketDataEvent
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("vol", "Volume"),
+       _node("c", "Constant", {"value": 0}), _node("if", "IfAbove"), _node("buy", "Buy")],
+      [_edge("ob", "if", tgt_h="in"),
+       _edge("vol", "if", src_h="out", tgt_h="a"),
+       _edge("c", "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g)  # no df — Volume still works
+    # Create a bar with volume=500 (> 0) → IfAbove fires → Buy
+    bar = MarketDataPayload(timestamp=0, symbol="T", price=100.0, volume=500, Close=100.0)
+    evt = MarketDataEvent(payload=bar)
+    sig = gs.on_event(evt)
+    assert sig.__class__.__name__ == "AddSignal"
+
+  def test_volume_zero_no_signal(self):
+    """Volume=0 → IfAbove(vol, 0) is false → NullSignal."""
+    from events.payloads.market_payload import MarketDataPayload
+    from events.event import MarketDataEvent
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("vol", "Volume"),
+       _node("c", "Constant", {"value": 0}), _node("if", "IfAbove"), _node("buy", "Buy")],
+      [_edge("ob", "if", tgt_h="in"),
+       _edge("vol", "if", src_h="out", tgt_h="a"),
+       _edge("c", "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g)
+    bar = MarketDataPayload(timestamp=0, symbol="T", price=100.0, volume=0, Close=100.0)
+    sig = gs.on_event(MarketDataEvent(payload=bar))
+    assert sig.__class__.__name__ == "NullSignal"
+
+  def test_stochastic_precomputed_has_k_and_d(self):
+    """Stochastic node stores k and d series."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("st", "Stochastic", {"k": 5, "d": 3})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "st" in gs._precomputed
+    assert "k" in gs._precomputed["st"]
+    assert "d" in gs._precomputed["st"]
+
+  def test_stochastic_k_in_0_100(self):
+    """Stochastic %K values must be in [0, 100] where defined."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("st", "Stochastic", {"k": 5, "d": 3})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    for v in gs._precomputed["st"]["k"]:
+      if v is not None:
+        assert 0.0 <= v <= 100.0
+
+  def test_stochastic_buy_when_k_oversold(self):
+    """Stochastic %K < 20 → IfBelow fires true → Buy."""
+    df = _make_ohlcv_df(60)
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("st", "Stochastic", {"k": 14, "d": 3}),
+       _node("c", "Constant", {"value": 20}), _node("if", "IfBelow"), _node("buy", "Buy")],
+      [_edge("ob", "if", tgt_h="in"),
+       _edge("st", "if", src_h="k", tgt_h="a"),
+       _edge("c", "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g, ohlcv_df=df)
+    prices = df["close"].tolist()
+    sigs = [gs.on_event(_event(p)).__class__.__name__ for p in prices]
+    # In a 60-bar random walk there should be at least one bar where %K < 20
+    assert "AddSignal" in sigs

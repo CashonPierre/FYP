@@ -1,8 +1,12 @@
 """
 GraphStrategy — evaluates a visual strategy graph per bar.
 
-Supported nodes: OnBar, Data, SMA, EMA, RSI, IfAbove, IfBelow,
-                 IfCrossAbove, IfCrossBelow, Constant, Buy, Sell
+Supported nodes:
+  Triggers  : OnBar
+  Data      : Data, Constant, Volume
+  Indicators: SMA, EMA, RSI, MACD, BollingerBands, ATR, Stochastic
+  Conditions: IfAbove, IfBelow, IfCrossAbove, IfCrossBelow
+  Actions   : Buy, Sell
 
 Graph JSON format (same as builder export):
   nodes: [{id, type, data: {params: {...}}, ...}]
@@ -15,9 +19,17 @@ Execution model:
   2. On on_event(bar): evaluate each node in order, passing values via
      a per-call output dict. Indicator values come from the precomputed
      series (O(1) lookup) when available; otherwise fall back to rolling
-     buffers (used by tests and any caller that does not supply a DataFrame).
+     buffers for SMA/EMA/RSI (used when no DataFrame is supplied, e.g. tests).
   3. Non-indicator state (crossover prev values, position flag) persists
      across bars regardless of mode.
+
+Precomputed structure:
+  _precomputed: dict[node_id, dict[handle, list[float | None]]]
+  Single-output indicators (SMA/EMA/RSI/ATR): {"out": [...]}
+  Multi-output indicators:
+    MACD          → {"macd": [...], "signal": [...], "histogram": [...]}
+    BollingerBands → {"upper": [...], "middle": [...], "lower": [...]}
+    Stochastic    → {"k": [...], "d": [...]}
 """
 
 from __future__ import annotations
@@ -47,8 +59,12 @@ def _node_data_field(node: dict, key: str, default: Any = None) -> Any:
   return data.get(key, default)
 
 
-# Indicator node types that support pandas_ta precomputation
-_INDICATOR_TYPES = frozenset({"SMA", "EMA", "RSI"})
+# Indicator node types that support pandas_ta precomputation.
+# Volume is intentionally excluded — it reads from the live bar, not the df.
+_INDICATOR_TYPES = frozenset({
+  "SMA", "EMA", "RSI",
+  "MACD", "BollingerBands", "ATR", "Stochastic",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +85,10 @@ class GraphStrategy:
               one row per bar in chronological order.  When provided, indicator
               series are precomputed with pandas_ta once at construction time
               and on_event performs O(1) index lookups.  When omitted the
-              strategy falls back to incremental rolling buffers (used by tests
-              and any caller that does not have a DataFrame handy).
+              strategy falls back to incremental rolling buffers for SMA/EMA/RSI
+              (used by tests and any caller without a DataFrame).  ATR, MACD,
+              BollingerBands and Stochastic require a DataFrame and return None
+              on every bar when one is not provided.
   """
 
   def __init__(self, graph: dict, ohlcv_df=None) -> None:
@@ -99,18 +117,20 @@ class GraphStrategy:
     self._has_exit: bool = bool(wired_sell_ids)
     self._in_position: bool = False
 
-    # Rolling-buffer state (fallback path when no df is provided)
+    # Rolling-buffer state (fallback for SMA/EMA/RSI when no df provided)
     self._price_buffers: dict[str, deque] = {}
     self._ema_values: dict[str, float | None] = {}
     self._rsi_state: dict[str, tuple[float, float] | None] = {}
 
     # Crossover state and bar counter (always used)
     self._cross_prev: dict[str, tuple[float | None, float | None]] = {}
-    self._bar_idx: int = -1  # incremented at the start of each on_event call
+    self._bar_idx: int = -1
 
-    # Precomputed indicator series: node_id → list[float | None]
-    # Built once from ohlcv_df; None entries mark warm-up bars (NaN from pandas_ta).
-    self._precomputed: dict[str, list[float | None]] = {}
+    # Precomputed indicator series:
+    #   node_id → {handle → list[float | None]}
+    # Single-output indicators store {"out": [...]}.
+    # Multi-output: see module docstring.
+    self._precomputed: dict[str, dict[str, list[float | None]]] = {}
     if ohlcv_df is not None:
       self._precompute_indicators(ohlcv_df)
 
@@ -151,9 +171,8 @@ class GraphStrategy:
   def _precompute_indicators(self, df) -> None:
     """
     Walk the execution order and precompute every indicator node's series
-    using pandas_ta.  Chained indicators (e.g. EMA of EMA) are supported:
-    the upstream node's precomputed series is used as input when available.
-    Results stored as list[float | None] with NaN converted to None.
+    using pandas_ta.  Results stored as dict[handle, list[float | None]]
+    with NaN converted to None.
     """
     import pandas as pd
     import pandas_ta as ta
@@ -165,6 +184,19 @@ class GraphStrategy:
       ]
 
     close = pd.Series(df["close"].values, dtype=float)
+    high = pd.Series(df["high"].values, dtype=float) if "high" in df.columns else close
+    low = pd.Series(df["low"].values, dtype=float) if "low" in df.columns else close
+
+    def _resolve_price(nid: str) -> pd.Series:
+      """Return the input price series for a node, following upstream chain."""
+      upstream = self._input_map.get((nid, "in"))
+      if upstream:
+        src_id, src_h = upstream
+        if src_id in self._precomputed:
+          src_data = self._precomputed[src_id]
+          series_list = src_data.get(src_h) or src_data.get("out") or []
+          return pd.Series(series_list, dtype=float)
+      return close
 
     for nid in self._exec_order:
       node = self._nodes[nid]
@@ -173,29 +205,78 @@ class GraphStrategy:
       if ntype not in _INDICATOR_TYPES:
         continue
 
-      period = int(_node_param(node, "period", 14))
-
-      # Resolve input price series — supports chaining (e.g. RSI of EMA)
-      upstream = self._input_map.get((nid, "in"))
-      if upstream:
-        src_id, _ = upstream
-        if src_id in self._precomputed:
-          price_series = pd.Series(self._precomputed[src_id], dtype=float)
+      if ntype in ("SMA", "EMA", "RSI"):
+        period = int(_node_param(node, "period", 14))
+        price_series = _resolve_price(nid)
+        if ntype == "SMA":
+          result = ta.sma(price_series, length=period)
+        elif ntype == "EMA":
+          result = ta.ema(price_series, length=period)
         else:
-          price_series = close
-      else:
-        price_series = close
+          result = ta.rsi(price_series, length=period)
+        self._precomputed[nid] = {"out": _to_list(result)}
 
-      if ntype == "SMA":
-        result = ta.sma(price_series, length=period)
-      elif ntype == "EMA":
-        result = ta.ema(price_series, length=period)
-      elif ntype == "RSI":
-        result = ta.rsi(price_series, length=period)
-      else:
-        continue
+      elif ntype == "MACD":
+        fast = int(_node_param(node, "fast", 12))
+        slow = int(_node_param(node, "slow", 26))
+        signal_p = int(_node_param(node, "signal", 9))
+        price_series = _resolve_price(nid)
+        result = ta.macd(price_series, fast=fast, slow=slow, signal=signal_p)
+        if result is None or result.empty:
+          n = len(close)
+          self._precomputed[nid] = {
+            "macd": [None] * n,
+            "histogram": [None] * n,
+            "signal": [None] * n,
+          }
+        else:
+          cols = result.columns.tolist()
+          # Column order: MACD line, histogram, signal
+          self._precomputed[nid] = {
+            "macd":      _to_list(result[cols[0]]),
+            "histogram": _to_list(result[cols[1]]),
+            "signal":    _to_list(result[cols[2]]),
+          }
 
-      self._precomputed[nid] = _to_list(result)
+      elif ntype == "BollingerBands":
+        period = int(_node_param(node, "period", 20))
+        std = float(_node_param(node, "std", 2.0))
+        price_series = _resolve_price(nid)
+        result = ta.bbands(price_series, length=period, std=std)
+        if result is None or result.empty:
+          n = len(close)
+          self._precomputed[nid] = {
+            "upper": [None] * n, "middle": [None] * n, "lower": [None] * n,
+          }
+        else:
+          cols = result.columns.tolist()
+          # Column order: BBL (lower), BBM (middle), BBU (upper)
+          self._precomputed[nid] = {
+            "lower":  _to_list(result[cols[0]]),
+            "middle": _to_list(result[cols[1]]),
+            "upper":  _to_list(result[cols[2]]),
+          }
+
+      elif ntype == "ATR":
+        period = int(_node_param(node, "period", 14))
+        result = ta.atr(high, low, close, length=period)
+        self._precomputed[nid] = {
+          "out": _to_list(result) if result is not None else [None] * len(close)
+        }
+
+      elif ntype == "Stochastic":
+        k = int(_node_param(node, "k", 14))
+        d = int(_node_param(node, "d", 3))
+        result = ta.stoch(high, low, close, k=k, d=d)
+        if result is None or result.empty:
+          n = len(close)
+          self._precomputed[nid] = {"k": [None] * n, "d": [None] * n}
+        else:
+          cols = result.columns.tolist()
+          self._precomputed[nid] = {
+            "k": _to_list(result[cols[0]]),
+            "d": _to_list(result[cols[1]]),
+          }
 
     logger.debug("GraphStrategy: precomputed %d indicator series (%d bars each)",
                  len(self._precomputed), len(close))
@@ -210,6 +291,16 @@ class GraphStrategy:
       return None
     src_id, src_h = src
     return outputs.get(src_id, {}).get(src_h)
+
+  def _precomp_val(self, nid: str, handle: str) -> float | None:
+    """Return the precomputed value for (nid, handle) at the current bar index."""
+    node_data = self._precomputed.get(nid)
+    if node_data is None:
+      return None
+    series = node_data.get(handle)
+    if series is None:
+      return None
+    return series[self._bar_idx] if self._bar_idx < len(series) else None
 
   def on_event(self, event: Any) -> Any:
     from events.event import MarketDataEvent
@@ -236,16 +327,19 @@ class GraphStrategy:
       elif ntype == "Data":
         outputs[nid] = {"out": float(bar.Close if bar.Close is not None else bar.price)}
 
+      # ── Volume ─────────────────────────────────────────────────────
+      elif ntype == "Volume":
+        outputs[nid] = {"out": float(bar.volume if bar.volume is not None else 0)}
+
       # ── SMA / EMA / RSI ────────────────────────────────────────────
       elif ntype in ("SMA", "EMA", "RSI"):
         period = int(_node_param(node, "period", 14))
 
         if nid in self._precomputed:
-          # Fast path: O(1) lookup from precomputed series
-          series = self._precomputed[nid]
-          val = series[self._bar_idx] if self._bar_idx < len(series) else None
+          # Fast path: O(1) lookup
+          val = self._precomp_val(nid, "out")
         else:
-          # Fallback: incremental rolling buffers (used when no df was provided)
+          # Fallback: incremental rolling buffers
           raw = self._upstream(outputs, nid, "in")
           if isinstance(raw, MarketDataPayload):
             price = float(raw.Close or raw.price)
@@ -266,6 +360,43 @@ class GraphStrategy:
             val = self._rsi(nid, period)
 
         outputs[nid] = {"out": val}
+
+      # ── MACD ───────────────────────────────────────────────────────
+      elif ntype == "MACD":
+        if nid in self._precomputed:
+          outputs[nid] = {
+            "macd":      self._precomp_val(nid, "macd"),
+            "signal":    self._precomp_val(nid, "signal"),
+            "histogram": self._precomp_val(nid, "histogram"),
+          }
+        else:
+          outputs[nid] = {"macd": None, "signal": None, "histogram": None}
+
+      # ── BollingerBands ─────────────────────────────────────────────
+      elif ntype == "BollingerBands":
+        if nid in self._precomputed:
+          outputs[nid] = {
+            "upper":  self._precomp_val(nid, "upper"),
+            "middle": self._precomp_val(nid, "middle"),
+            "lower":  self._precomp_val(nid, "lower"),
+          }
+        else:
+          outputs[nid] = {"upper": None, "middle": None, "lower": None}
+
+      # ── ATR ────────────────────────────────────────────────────────
+      elif ntype == "ATR":
+        val = self._precomp_val(nid, "out") if nid in self._precomputed else None
+        outputs[nid] = {"out": val}
+
+      # ── Stochastic ─────────────────────────────────────────────────
+      elif ntype == "Stochastic":
+        if nid in self._precomputed:
+          outputs[nid] = {
+            "k": self._precomp_val(nid, "k"),
+            "d": self._precomp_val(nid, "d"),
+          }
+        else:
+          outputs[nid] = {"k": None, "d": None}
 
       # ── IfAbove ────────────────────────────────────────────────────
       elif ntype == "IfAbove":
@@ -365,7 +496,7 @@ class GraphStrategy:
     return NullSignal()
 
   # ------------------------------------------------------------------
-  # Rolling-buffer indicator calculations (fallback path)
+  # Rolling-buffer indicator calculations (SMA/EMA/RSI fallback path)
   # ------------------------------------------------------------------
 
   def _to_float(self, val: Any, bar: Any) -> float | None:
@@ -441,6 +572,5 @@ class GraphStrategy:
     self._cross_prev.clear()
     self._in_position = False
     self._bar_idx = -1
-    # _precomputed is intentionally NOT cleared — the series are derived from
-    # the DataFrame passed at construction and remain valid across resets.
-    # _bar_idx is reset to -1 so the next on_event starts at position 0.
+    # _precomputed intentionally NOT cleared — derived from the DataFrame
+    # passed at construction; _bar_idx reset so replay starts at position 0.
