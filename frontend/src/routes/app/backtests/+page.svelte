@@ -19,6 +19,27 @@
 
   let runs = $state<BacktestListItem[]>([]);
   let loading = $state(true);
+  let selected = $state<Set<string>>(new Set());
+
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selected = next;
+  };
+
+  const clearSelection = () => {
+    selected = new Set();
+  };
+
+  const compareSelected = () => {
+    const ids = [...selected];
+    if (ids.length < 2) {
+      toast.error('Select at least 2 runs to compare');
+      return;
+    }
+    goto(`/app/backtests/compare?ids=${ids.join(',')}`);
+  };
 
   const statusColor: Record<RunStatus, string> = {
     queued: 'text-muted-foreground',
@@ -66,9 +87,21 @@
 <div class="flex items-start justify-between gap-4">
   <div class="space-y-1">
     <h1 class="text-2xl font-bold tracking-tight">Backtest History</h1>
-    <p class="text-sm text-muted-foreground">All your past backtest runs.</p>
+    <p class="text-sm text-muted-foreground">
+      {selected.size > 0
+        ? `${selected.size} selected — pick 2 or more to compare`
+        : 'Tick two or more runs to compare them side-by-side.'}
+    </p>
   </div>
-  <Button onclick={() => goto('/app/backtests/new')}>New Backtest</Button>
+  <div class="flex items-center gap-2">
+    {#if selected.size > 0}
+      <Button variant="ghost" onclick={clearSelection}>Clear</Button>
+      <Button variant="outline" onclick={compareSelected} disabled={selected.size < 2}>
+        Compare ({selected.size})
+      </Button>
+    {/if}
+    <Button onclick={() => goto('/app/backtests/new')}>New Backtest</Button>
+  </div>
 </div>
 
 <div class="mt-6">
@@ -87,20 +120,33 @@
   {:else}
     <div class="space-y-2">
       {#each runs as run (run.id)}
-        <Card.Root
-          class="border cursor-pointer hover:bg-muted/40 transition-colors"
-          onclick={() => goto(`/app/backtests/${run.id}`)}
-        >
+        {@const canCompare = run.status === 'completed'}
+        <Card.Root class="border">
           <Card.CardContent class="flex items-center justify-between py-4">
-            <div class="flex items-center gap-6">
-              <div>
-                <div class="font-medium">{run.symbol}</div>
-                <div class="text-xs text-muted-foreground">{run.timeframe}</div>
-              </div>
-              <div>
-                <div class="text-xs text-muted-foreground">Created</div>
-                <div class="text-sm">{fmtDate(run.created_at)}</div>
-              </div>
+            <div class="flex items-center gap-4">
+              <input
+                type="checkbox"
+                class="h-4 w-4 accent-primary disabled:opacity-40"
+                checked={selected.has(run.id)}
+                disabled={!canCompare}
+                title={canCompare ? 'Select to compare' : 'Only completed runs can be compared'}
+                onclick={(e) => e.stopPropagation()}
+                onchange={() => toggle(run.id)}
+              />
+              <button
+                type="button"
+                class="flex flex-1 items-center gap-6 text-left hover:opacity-80"
+                onclick={() => goto(`/app/backtests/${run.id}`)}
+              >
+                <div>
+                  <div class="font-medium">{run.symbol}</div>
+                  <div class="text-xs text-muted-foreground">{run.timeframe}</div>
+                </div>
+                <div>
+                  <div class="text-xs text-muted-foreground">Created</div>
+                  <div class="text-sm">{fmtDate(run.created_at)}</div>
+                </div>
+              </button>
             </div>
             <div class="flex items-center gap-6">
               {#if run.total_return != null}
