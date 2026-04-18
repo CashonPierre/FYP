@@ -52,6 +52,17 @@
     }
     return cmds.join(" ");
   });
+
+  const fmtDate = (iso: string) => iso.slice(0, 10);
+
+  const xTicks = $derived.by(() => {
+    if (points.length < 2) return [];
+    const count = Math.min(5, points.length);
+    return Array.from({ length: count }, (_, k) => {
+      const i = Math.round((k * (points.length - 1)) / (count - 1));
+      return { x: xForIndex(i, points.length), label: fmtDate(points[i].time) };
+    });
+  });
 </script>
 
 <svg
@@ -92,12 +103,15 @@
 
   <path d={pathD} fill="none" stroke="var(--primary)" stroke-width="2.5" />
 
-  <text
-    x={PADDING.left}
-    y={height - 8}
-    font-size="11"
-    fill="var(--muted-foreground)"
-  >
-    Time →
-  </text>
+  {#each xTicks as tick, i (tick.x + ':' + i)}
+    <text
+      x={tick.x}
+      y={height - 6}
+      text-anchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
+      font-size="11"
+      fill="var(--muted-foreground)"
+    >
+      {tick.label}
+    </text>
+  {/each}
 </svg>

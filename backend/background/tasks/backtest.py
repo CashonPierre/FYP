@@ -14,7 +14,7 @@ from sqlalchemy import select, and_
 # Custom
 from background.celery_app import celery_worker
 from database.make_db import SessionLocal
-from database.models import BacktestRun, RunMetrics, Trade, OhlcBar
+from database.models import BacktestRun, RunMetrics, Trade, OhlcBar, EquityPoint
 from configs import get_logger
 
 ENGINE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'trading_engine')
@@ -170,9 +170,13 @@ def run_backtest(self: Task, run_id: str) -> None:
     strategy = _strategy_from_graph(graph, ohlcv_df=ohlcv_df)
     engine.add_strategy(strategy)
 
-    # Push market data events
+    # Push market data events one bar at a time so we can snapshot the
+    # portfolio's current_capital after each bar. That gives us a step-shaped
+    # equity curve (flat between trades, step on each close) without changing
+    # engine semantics — run() just drains the queue each call.
+    equity_snapshots: list[tuple[datetime, float]] = []
+    portfolio = engine._portfolio
     for bar in bars:
-      # Engine uses YYYYMMDD int timestamps
       ts = int(bar.time.strftime("%Y%m%d"))
       payload = MarketDataPayload(
         timestamp=ts,
@@ -185,12 +189,10 @@ def run_backtest(self: Task, run_id: str) -> None:
         Close=bar.close,
       )
       engine.push_event(MarketDataEvent(timestamp=ts, payload=payload))
-
-    # --- 5. Run the engine ---
-    engine.run()
+      engine.run()
+      equity_snapshots.append((bar.time, float(portfolio.current_capital)))
 
     # --- 6. Extract results ---
-    portfolio = engine._portfolio
     metrics = portfolio.get_trading_metrics()
     engine_trades = portfolio._trades
     final_capital = portfolio.current_capital
@@ -252,7 +254,14 @@ def run_backtest(self: Task, run_id: str) -> None:
           slippage=0.0,
         ))
 
-    # --- 9. Mark completed ---
+    # --- 9. Store EquityPoints (batch insert; one row per bar) ---
+    if equity_snapshots:
+      session.bulk_save_objects([
+        EquityPoint(run_id=run.id, time=t, equity=eq)
+        for t, eq in equity_snapshots
+      ])
+
+    # --- 10. Mark completed ---
     run.status = "completed"
     run.ended_at = datetime.now(timezone.utc)
     session.commit()

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 # Custom
 from database.make_db import get_session
-from database.models import BacktestRun, BacktestBatch, RunMetrics, Trade, OhlcBar
+from database.models import BacktestRun, BacktestBatch, RunMetrics, Trade, OhlcBar, EquityPoint as EquityPointModel
 from api.auth.dependencies import get_current_user
 from api.auth.schemas import CurrentUser
 from api.auth.repositories import get_user_by_email
@@ -247,6 +247,16 @@ def get_backtest_results(
     for row in ohlc_rows
   ]
 
+  equity_stmt = (
+    select(EquityPointModel)
+    .where(EquityPointModel.run_id == run.id)
+    .order_by(EquityPointModel.time)
+  )
+  equity_points = [
+    EquityPoint(time=row.time.isoformat(), equity=row.equity)
+    for row in session.execute(equity_stmt).scalars().all()
+  ]
+
   return BacktestResults(
     id=run.id,
     status=run.status,
@@ -254,7 +264,7 @@ def get_backtest_results(
     series=ResultSeries(
       ohlc=ohlc_points,
       trades=trade_points,
-      equity=[],  # TODO: populate from equity_curve table once implemented
+      equity=equity_points,
     ),
   )
 

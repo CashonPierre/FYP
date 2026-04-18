@@ -65,6 +65,15 @@
     const approx = w / n;
     return Math.max(3, Math.min(14, approx * 0.6));
   });
+
+  const xTicks = $derived.by(() => {
+    if (bars.length < 2) return [];
+    const count = Math.min(5, bars.length);
+    return Array.from({ length: count }, (_, k) => {
+      const i = Math.round((k * (bars.length - 1)) / (count - 1));
+      return { x: xForIndex(i, bars.length), label: toDate(bars[i].time) };
+    });
+  });
 </script>
 
 <svg
@@ -160,13 +169,16 @@
     {/if}
   {/each}
 
-  <!-- x-axis label -->
-  <text
-    x={PADDING.left}
-    y={height - 8}
-    font-size="11"
-    fill="var(--muted-foreground)"
-  >
-    Time →
-  </text>
+  <!-- x-axis date ticks -->
+  {#each xTicks as tick, i (tick.x + ':' + i)}
+    <text
+      x={tick.x}
+      y={height - 6}
+      text-anchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
+      font-size="11"
+      fill="var(--muted-foreground)"
+    >
+      {tick.label}
+    </text>
+  {/each}
 </svg>
