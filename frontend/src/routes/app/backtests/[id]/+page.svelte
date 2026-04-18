@@ -297,6 +297,14 @@
     return () => clearInterval(pollTimer);
   });
 
+  const benchmark = $derived.by<EquityPoint[]>(() => {
+    if (ohlc.length === 0) return [];
+    const initial = apiResults?.summary?.initial_capital ?? 10000;
+    const first = ohlc[0].close;
+    if (!first) return [];
+    return ohlc.map((b) => ({ time: b.time, equity: (initial * b.close) / first }));
+  });
+
   const summary = $derived.by(() => {
     const api = apiResults?.summary ?? null;
 
@@ -487,7 +495,12 @@
           <Card.Description>Portfolio value over time.</Card.Description>
         </Card.Header>
         <Card.CardContent>
-          <EquityCurveChart points={equity} height={220} />
+          <EquityCurveChart
+            points={equity}
+            benchmark={benchmark}
+            benchmarkLabel={`Buy & Hold ${summary.triggerSymbol}`}
+            height={220}
+          />
         </Card.CardContent>
       </Card.Root>
 

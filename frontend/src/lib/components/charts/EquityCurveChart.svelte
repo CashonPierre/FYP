@@ -4,7 +4,17 @@
     equity: number;
   };
 
-  let { points, height = 220 }: { points: EquityPoint[]; height?: number } = $props();
+  let {
+    points,
+    benchmark = [],
+    benchmarkLabel = 'Benchmark',
+    height = 220,
+  }: {
+    points: EquityPoint[];
+    benchmark?: EquityPoint[];
+    benchmarkLabel?: string;
+    height?: number;
+  } = $props();
 
   const WIDTH = 1000;
   const PADDING = { top: 16, right: 16, bottom: 24, left: 64 };
@@ -21,7 +31,9 @@
     return { min, max };
   };
 
-  const range = $derived.by(() => extent(points.map((p) => p.equity)));
+  const range = $derived.by(() =>
+    extent([...points.map((p) => p.equity), ...benchmark.map((p) => p.equity)])
+  );
 
   const yFor = (value: number, min: number, max: number) => {
     const h = height - PADDING.top - PADDING.bottom;
@@ -42,16 +54,19 @@
       maximumFractionDigits: 0,
     }).format(value);
 
-  const pathD = $derived.by(() => {
-    if (points.length === 0) return "";
+  const buildPath = (series: EquityPoint[]) => {
+    if (series.length === 0) return "";
     const cmds: string[] = [];
-    for (let i = 0; i < points.length; i++) {
-      const x = xForIndex(i, points.length);
-      const y = yFor(points[i].equity, range.min, range.max);
+    for (let i = 0; i < series.length; i++) {
+      const x = xForIndex(i, series.length);
+      const y = yFor(series[i].equity, range.min, range.max);
       cmds.push(`${i === 0 ? "M" : "L"} ${x} ${y}`);
     }
     return cmds.join(" ");
-  });
+  };
+
+  const pathD = $derived.by(() => buildPath(points));
+  const benchmarkD = $derived.by(() => buildPath(benchmark));
 
   const fmtDate = (iso: string) => iso.slice(0, 10);
 
@@ -101,7 +116,28 @@
     {/each}
   {/if}
 
+  {#if benchmark.length > 0}
+    <path
+      d={benchmarkD}
+      fill="none"
+      stroke="var(--muted-foreground)"
+      stroke-width="2"
+      stroke-dasharray="4 4"
+      opacity="0.8"
+    />
+  {/if}
+
   <path d={pathD} fill="none" stroke="var(--primary)" stroke-width="2.5" />
+
+  {#if benchmark.length > 0}
+    <g transform={`translate(${PADDING.left + 8}, ${PADDING.top + 4})`}>
+      <rect x="0" y="0" width="150" height="36" rx="4" fill="var(--background)" opacity="0.85" />
+      <line x1="8" y1="12" x2="24" y2="12" stroke="var(--primary)" stroke-width="2.5" />
+      <text x="30" y="15" font-size="11" fill="var(--foreground)">Strategy</text>
+      <line x1="8" y1="27" x2="24" y2="27" stroke="var(--muted-foreground)" stroke-width="2" stroke-dasharray="4 4" />
+      <text x="30" y="30" font-size="11" fill="var(--muted-foreground)">{benchmarkLabel}</text>
+    </g>
+  {/if}
 
   {#each xTicks as tick, i (tick.x + ':' + i)}
     <text
