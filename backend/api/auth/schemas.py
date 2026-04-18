@@ -1,6 +1,6 @@
 # External
 from typing import Literal
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 # Custom
 from app_common.enums import PayloadEnum
@@ -13,9 +13,9 @@ class LoginRequest(BaseModel):
 
 
 class UserCreate(BaseModel):
-    username: str
+    username: str = Field(min_length=3, max_length=64)
     email: str
-    password: str
+    password: str = Field(min_length=8, max_length=128)
 
 
 class UserPublic(BaseModel):
@@ -46,4 +46,4 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str
+    new_password: str = Field(min_length=8, max_length=128)

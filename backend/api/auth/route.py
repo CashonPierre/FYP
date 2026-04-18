@@ -243,9 +243,6 @@ def reset_password(
     if not user:
         raise NotFoundError(message="User not found")
 
-    if not payload.new_password or len(payload.new_password) < 8:
-        raise InvalidCredentialsError(message="Password must be at least 8 characters")
-
     user.hashed_password = hash_password(payload.new_password)
     session.add(user)
     return Response(status_code=status.HTTP_200_OK, content="Password reset successfully")
