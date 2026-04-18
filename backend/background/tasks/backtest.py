@@ -4,12 +4,12 @@ import os
 import json
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import cast
 
 # External
 from celery import Task
-from sqlalchemy import select, and_
+from sqlalchemy import func, select, and_
 
 # Custom
 from background.celery_app import celery_worker
@@ -20,6 +20,107 @@ from configs import get_logger
 ENGINE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'trading_engine')
 
 logger = get_logger()
+
+
+def _parse_date(value, fallback: datetime) -> datetime:
+  """Best-effort parse of a settings date (ISO string or already-a-datetime).
+  Falls back to `fallback` on any failure."""
+  if not value:
+    return fallback
+  try:
+    dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+  except ValueError:
+    return fallback
+  if dt.tzinfo is None:
+    dt = dt.replace(tzinfo=timezone.utc)
+  return dt
+
+
+def _auto_refresh_if_needed(
+  symbol: str,
+  timeframe: str,
+  start_date,
+  end_date,
+) -> None:
+  """Ensure DB covers the requested [start_date, end_date] window for this
+  symbol/timeframe; fetch from yfinance if either end is missing.
+
+  Branches:
+    - No bars at all                         → full fetch (start_date → today)
+    - Earliest bar is AFTER start_date       → re-fetch from start_date
+    - Latest bar is >1 day behind end_date   → incremental tail fetch
+    - Otherwise                              → skip
+
+  Best-effort: failures are logged and swallowed so the run can still
+  proceed against whatever data exists.
+  """
+  from background.tasks.market_refresh import fetch_and_upsert, _TF_MAP
+
+  if timeframe not in _TF_MAP:
+    return  # not a refresh-pipeline timeframe (e.g. "5m")
+
+  session = SessionLocal()
+  try:
+    row = session.execute(
+      select(
+        func.min(OhlcBar.time),
+        func.max(OhlcBar.time),
+      ).where(
+        OhlcBar.symbol == symbol,
+        OhlcBar.timeframe == timeframe,
+      )
+    ).one()
+    earliest, latest = row[0], row[1]
+  finally:
+    session.close()
+
+  # SQLite stores naive datetimes; Postgres returns aware. Normalise so
+  # comparisons below don't blow up in either environment.
+  if earliest is not None and earliest.tzinfo is None:
+    earliest = earliest.replace(tzinfo=timezone.utc)
+  if latest is not None and latest.tzinfo is None:
+    latest = latest.replace(tzinfo=timezone.utc)
+
+  today_utc = datetime.now(timezone.utc).replace(
+    hour=0, minute=0, second=0, microsecond=0
+  )
+
+  # Cap target_end at today — yfinance can't return future bars.
+  target_end = min(_parse_date(end_date, today_utc), today_utc)
+  # target_start is only used to force a backfill when requested window
+  # starts earlier than what we have.
+  target_start = _parse_date(start_date, None)  # type: ignore[arg-type]
+
+  tail_stale = latest is None or latest < target_end - timedelta(days=1)
+  head_missing = (
+    target_start is not None
+    and earliest is not None
+    and earliest > target_start
+  )
+  completely_missing = latest is None
+
+  if not (tail_stale or head_missing or completely_missing):
+    return
+
+  # Force a full-range fetch when the head is missing; otherwise let
+  # fetch_and_upsert resume incrementally from latest.
+  force_start: str | None = None
+  if completely_missing or head_missing:
+    force_start = (
+      target_start.strftime("%Y-%m-%d") if target_start else None
+    )
+
+  try:
+    logger.info(
+      "auto-refresh: %s %s — earliest=%s latest=%s target=[%s→%s] start=%s",
+      symbol, timeframe, earliest, latest, target_start, target_end, force_start,
+    )
+    fetch_and_upsert(symbol=symbol, timeframe=timeframe, start=force_start)
+  except Exception as exc:
+    logger.warning(
+      "auto-refresh %s %s failed: %s — proceeding with existing data",
+      symbol, timeframe, exc,
+    )
 
 
 class _BarRow:
@@ -178,6 +279,15 @@ def run_backtest(self: Task, run_id: str) -> None:
     else:
       if not symbol:
         raise ValueError("No symbol provided in backtest settings")
+
+      # Auto-fetch from yfinance if DB doesn't fully cover the requested
+      # [start_date, end_date] window. Best-effort — failures are swallowed.
+      _auto_refresh_if_needed(
+        symbol=symbol,
+        timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date,
+      )
 
       stmt = select(OhlcBar).where(
         and_(
