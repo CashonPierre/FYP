@@ -22,6 +22,9 @@
     | 'ATR'
     | 'Volume'
     | 'Stochastic'
+    | 'ROC'
+    | 'WilliamsR'
+    | 'CCI'
     | 'IfAbove'
     | 'IfBelow'
     | 'IfCrossAbove'
@@ -76,6 +79,9 @@
     { type: 'ATR', title: 'ATR', hint: 'Average True Range (volatility)' },
     { type: 'Volume', title: 'Volume', hint: 'Bar volume as a number' },
     { type: 'Stochastic', title: 'Stochastic', hint: 'Stochastic %K and %D oscillator' },
+    { type: 'ROC', title: 'ROC', hint: 'Rate of Change (% over N bars)' },
+    { type: 'WilliamsR', title: 'Williams %R', hint: 'Momentum oscillator (-100 to 0)' },
+    { type: 'CCI', title: 'CCI', hint: 'Commodity Channel Index' },
     // Conditions
     { type: 'IfAbove', title: 'If A > B', hint: 'True while A is above B' },
     { type: 'IfBelow', title: 'If A < B', hint: 'True while A is below B' },
@@ -181,12 +187,15 @@
       case 'SMA':
       case 'EMA':
       case 'RSI':
+      case 'ROC':
         return {
           inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
           outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
         };
       case 'ATR':
-        // ATR uses H/L/C from the OHLCV DataFrame — no wirable input needed
+      case 'WilliamsR':
+      case 'CCI':
+        // H/L/C-based indicators — consume OHLCV from the DataFrame, no wirable input
         return {
           inputs: [],
           outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
@@ -306,6 +315,12 @@
         return { period: 14 };
       case 'Stochastic':
         return { k: 14, d: 3 };
+      case 'ROC':
+        return { period: 10 };
+      case 'WilliamsR':
+        return { period: 14 };
+      case 'CCI':
+        return { period: 20 };
       case 'Buy':
         return { amount: 10 };
       case 'Constant':
@@ -544,14 +559,14 @@
         });
       }
 
-      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR'].includes(node.type) && typeof node.params.period !== 'number') {
+      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR', 'ROC', 'WilliamsR', 'CCI'].includes(node.type) && typeof node.params.period !== 'number') {
         issues.push({
           level: 'error',
           nodeId: node.id,
           message: 'Period must be a number.',
         });
       }
-      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR'].includes(node.type) && Number(node.params.period) <= 0) {
+      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR', 'ROC', 'WilliamsR', 'CCI'].includes(node.type) && Number(node.params.period) <= 0) {
         issues.push({
           level: 'error',
           nodeId: node.id,
@@ -652,6 +667,9 @@
       else if (n.type === 'ATR' || n.type === 'BollingerBands') needed = Number(n.params.period) || 0;
       else if (n.type === 'MACD') needed = (Number(n.params.slow) || 26) + (Number(n.params.signal) || 9) - 1;
       else if (n.type === 'Stochastic') needed = (Number(n.params.k) || 14) + (Number(n.params.d) || 3);
+      else if (n.type === 'ROC') needed = (Number(n.params.period) || 0) + 1;
+      else if (n.type === 'WilliamsR') needed = Number(n.params.period) || 0;
+      else if (n.type === 'CCI') needed = Number(n.params.period) || 0;
       return Math.max(max, needed);
     }, 0)
   );

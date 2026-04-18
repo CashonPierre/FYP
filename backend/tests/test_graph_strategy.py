@@ -1103,3 +1103,35 @@ class TestHighPriorityNodes:
         assert sig == "AddSignal", f"bar {i}: expected AddSignal when %K={k_val:.1f} < 20"
       elif k_val is not None and k_val > 20:
         assert sig == "NullSignal", f"bar {i}: expected NullSignal when %K={k_val:.1f} > 20"
+
+  def test_roc_precomputed_single_out(self):
+    """ROC node stores a single 'out' series; first `period` values are None."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("roc", "ROC", {"period": 5})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "roc" in gs._precomputed
+    out = gs._precomputed["roc"]["out"]
+    # First `period` values should be None (not enough history)
+    assert out[0] is None
+    # Later values must be floats
+    assert any(v is not None for v in out[10:])
+
+  def test_williamsr_precomputed_in_valid_range(self):
+    """Williams %R must be in [-100, 0] where defined."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("wr", "WilliamsR", {"period": 14})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    out = gs._precomputed["wr"]["out"]
+    for v in out:
+      if v is not None:
+        assert -100.0 <= v <= 0.0, f"Williams %R out of range: {v}"
+
+  def test_cci_precomputed_single_out(self):
+    """CCI node stores a single 'out' series."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("cci", "CCI", {"period": 20})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "cci" in gs._precomputed
+    assert "out" in gs._precomputed["cci"]
+    # Must produce at least one numeric value
+    assert any(v is not None for v in gs._precomputed["cci"]["out"])

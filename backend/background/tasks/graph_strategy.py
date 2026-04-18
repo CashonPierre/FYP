@@ -4,7 +4,8 @@ GraphStrategy — evaluates a visual strategy graph per bar.
 Supported nodes:
   Triggers  : OnBar
   Data      : Data, Constant, Volume
-  Indicators: SMA, EMA, RSI, MACD, BollingerBands, ATR, Stochastic
+  Indicators: SMA, EMA, RSI, MACD, BollingerBands, ATR, Stochastic,
+              ROC, WilliamsR, CCI
   Conditions: IfAbove, IfBelow, IfCrossAbove, IfCrossBelow
   Actions   : Buy, Sell
 
@@ -71,6 +72,7 @@ def _node_data_field(node: dict, key: str, default: Any = None) -> Any:
 _INDICATOR_TYPES = frozenset({
   "SMA", "EMA", "RSI",
   "MACD", "BollingerBands", "ATR", "Stochastic",
+  "ROC", "WilliamsR", "CCI",
 })
 
 
@@ -306,6 +308,28 @@ class GraphStrategy:
             "d": _to_list(result[d_col]),
           }
 
+      elif ntype == "ROC":
+        period = int(_node_param(node, "period", 10))
+        price_series = _resolve_price(nid)
+        result = ta.roc(price_series, length=period)
+        self._precomputed[nid] = {
+          "out": _to_list(result) if result is not None else [None] * len(close)
+        }
+
+      elif ntype == "WilliamsR":
+        period = int(_node_param(node, "period", 14))
+        result = ta.willr(high, low, close, length=period)
+        self._precomputed[nid] = {
+          "out": _to_list(result) if result is not None else [None] * len(close)
+        }
+
+      elif ntype == "CCI":
+        period = int(_node_param(node, "period", 20))
+        result = ta.cci(high, low, close, length=period)
+        self._precomputed[nid] = {
+          "out": _to_list(result) if result is not None else [None] * len(close)
+        }
+
     logger.debug("GraphStrategy: precomputed %d indicator series (%d bars each)",
                  len(self._precomputed), len(close))
 
@@ -425,6 +449,11 @@ class GraphStrategy:
           }
         else:
           outputs[nid] = {"k": None, "d": None}
+
+      # ── ROC / Williams %R / CCI ────────────────────────────────────
+      elif ntype in ("ROC", "WilliamsR", "CCI"):
+        val = self._precomp_val(nid, "out") if nid in self._precomputed else None
+        outputs[nid] = {"out": val}
 
       # ── IfAbove ────────────────────────────────────────────────────
       elif ntype == "IfAbove":
