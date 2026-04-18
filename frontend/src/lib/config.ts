@@ -2,8 +2,10 @@
  * Central config for runtime values that differ between local dev and production.
  * All client-side code should import BACKEND from here instead of hardcoding the URL.
  *
- * Set PUBLIC_BACKEND_URL in .env (local) or your hosting provider's env vars (prod).
- * Vite exposes PUBLIC_-prefixed vars via import.meta.env at build time.
+ * PUBLIC_BACKEND_URL must be set in .env (local) and in the hosting provider's env
+ * vars (prod). SvelteKit's $env/static/public fails the build if it's missing, so
+ * there is no silent localhost fallback.
  */
-export const BACKEND: string =
-  (import.meta.env.PUBLIC_BACKEND_URL as string | undefined) ?? 'http://localhost:8000';
+import { PUBLIC_BACKEND_URL } from '$env/static/public';
+
+export const BACKEND: string = PUBLIC_BACKEND_URL;

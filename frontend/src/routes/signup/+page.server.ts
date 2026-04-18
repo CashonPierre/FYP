@@ -1,10 +1,11 @@
 import type { Actions } from './$types.js'
 import { fail } from '@sveltejs/kit'
 import { env } from '$env/dynamic/private'
+import { PUBLIC_BACKEND_URL } from '$env/static/public'
 
 import { signupSchema } from '$lib/schemas/SignupSchema.js'
 
-const backendOrigin = env.BACKEND_ORIGIN ?? 'http://localhost:8000'
+const backendOrigin = env.BACKEND_ORIGIN ?? PUBLIC_BACKEND_URL
 
 export const actions: Actions = {
   register: async ({ request, fetch }) => {
