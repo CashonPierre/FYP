@@ -38,3 +38,12 @@ class JwtToken(BaseModel):
     exp: int | None = None
     iat: int
     what: PayloadEnum
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str

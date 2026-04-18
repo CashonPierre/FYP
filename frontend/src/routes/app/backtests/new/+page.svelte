@@ -94,6 +94,13 @@
   const IMPORT_KEY = 'backtest:import:v0';
 
   const selected = $derived(nodes.find((n) => n.id === selectedId) ?? null);
+
+  // Seed missing params when a node is selected so the inspector always has defaults
+  $effect(() => {
+    if (selected?.type === 'Buy' && selected.params.amount == null) {
+      updateNodeParam(selected.id, 'amount', 10);
+    }
+  });
   const nodeMap = $derived(new Map(nodes.map((n) => [n.id, n] as const)));
   const selectedEdges = $derived({
     incoming: selectedId ? edges.filter((e) => e.target === selectedId) : [],
@@ -213,6 +220,8 @@
         return { period: 20 };
       case 'RSI':
         return { period: 14, overbought: 70, oversold: 30 };
+      case 'Buy':
+        return { amount: 10 };
       case 'Data':
         return { timeframe: '1D' };
       default:
@@ -439,14 +448,14 @@
         }
       }
 
-      if ((node.type === 'SMA' || node.type === 'EMA') && typeof node.params.period !== 'number') {
+      if (['SMA', 'EMA', 'RSI'].includes(node.type) && typeof node.params.period !== 'number') {
         issues.push({
           level: 'error',
           nodeId: node.id,
           message: 'Period must be a number.',
         });
       }
-      if ((node.type === 'SMA' || node.type === 'EMA') && Number(node.params.period) <= 0) {
+      if (['SMA', 'EMA', 'RSI'].includes(node.type) && Number(node.params.period) <= 0) {
         issues.push({
           level: 'error',
           nodeId: node.id,
@@ -521,6 +530,19 @@
   const errors = $derived(issues.filter((i) => i.level === 'error'));
   const hasErrors = $derived(errors.length > 0);
 
+  // Maximum warm-up bars required by any indicator node in the graph.
+  // SMA/EMA/RSI need `period` bars before they can produce a value.
+  const maxWarmupBars = $derived(
+    nodes
+      .filter((n) => ['SMA', 'EMA', 'RSI'].includes(n.type))
+      .reduce((max, n) => {
+        const period = Number(n.params.period) || 0;
+        // RSI needs period+1 prices (N changes require N+1 prices)
+        const needed = n.type === 'RSI' ? period + 1 : period;
+        return Math.max(max, needed);
+      }, 0)
+  );
+
   const issueForSelected = $derived(
     selectedId ? issues.filter((i) => i.nodeId === selectedId) : []
   );
@@ -563,7 +585,7 @@
 
     nodes = [
       { id: onBarId, type: 'OnBar', x: 60, y: 100, label: 'OnBar', params: { timeframe: '1D' } },
-      { id: buyId, type: 'Buy', x: 340, y: 100, label: 'Buy', params: {} },
+      { id: buyId, type: 'Buy', x: 340, y: 100, label: 'Buy', params: { amount: 10 } },
     ];
 
     edges = [
@@ -777,6 +799,8 @@
     selectedId = null;
     pendingSourceId = null;
     pendingSourceHandle = null;
+    loadedStrategyId = null;
+    loadedStrategyName = '';
     resetView();
 
     if (settings) {
@@ -847,9 +871,12 @@
   let showLoad = $state(false);
   let saveName = $state('');
   let savedStrategies = $state<{ id: string; name: string; updated_at: string }[]>([]);
+  let loadedStrategyId = $state<string | null>(null);
+  let loadedStrategyName = $state('');
+  let isSaving = $state(false);
 
   const openSave = () => {
-    saveName = '';
+    saveName = loadedStrategyId ? loadedStrategyName : '';
     showSave = true;
     showLoad = false;
     showExport = false;
@@ -877,21 +904,38 @@
 
   const saveStrategy = async () => {
     if (!saveName.trim()) { toast.error('Enter a strategy name'); return; }
+    if (isSaving) return;
     const token = localStorage.getItem('token');
     if (!token) { toast.error('Not logged in'); goto('/login'); return; }
 
+    isSaving = true;
     const payload = buildExportPayload();
+    const name = saveName.trim();
     try {
-      const res = await fetch(`${BACKEND}/strategies`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: saveName.trim(), graph_json: payload }),
-      });
+      let res: Response;
+      if (loadedStrategyId) {
+        res = await fetch(`${BACKEND}/strategies/${loadedStrategyId}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ name, graph_json: payload }),
+        });
+      } else {
+        res = await fetch(`${BACKEND}/strategies`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ name, graph_json: payload }),
+        });
+      }
       if (!res.ok) { toast.error('Save failed'); return; }
-      toast.success(`Strategy "${saveName.trim()}" saved`);
+      const saved = await res.json() as { id: string; name: string };
+      loadedStrategyId = saved.id;
+      loadedStrategyName = saved.name;
+      toast.success(`Strategy "${name}" saved`);
       showSave = false;
     } catch {
       toast.error('Could not reach backend');
+    } finally {
+      isSaving = false;
     }
   };
 
@@ -903,8 +947,10 @@
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) { toast.error('Could not load strategy'); return; }
-      const data = await res.json() as { graph_json: { version: number; settings: Record<string, unknown>; graph: { nodes: unknown[]; edges: unknown[] } } };
+      const data = await res.json() as { id: string; name: string; graph_json: { version: number; settings: Record<string, unknown>; graph: { nodes: unknown[]; edges: unknown[] } } };
       applyImportedPayload(data.graph_json);
+      loadedStrategyId = data.id;
+      loadedStrategyName = data.name;
       showLoad = false;
       toast.success('Strategy loaded');
     } catch {
@@ -1020,6 +1066,12 @@
         Clear dates
       </button>
     </div>
+    {#if maxWarmupBars > 0}
+      <div class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+        Warm-up: this strategy needs at least {maxWarmupBars} bars before producing signals.
+        Make sure your date range is long enough.
+      </div>
+    {/if}
   </div>
 
   <div class="flex items-center gap-2">
@@ -1123,13 +1175,16 @@
         <button class="rounded-md px-2 py-1 text-sm hover:bg-accent" type="button" onclick={() => showSave = false}>Close</button>
       </div>
       <div class="p-4 space-y-3">
+        {#if loadedStrategyId}
+          <p class="text-sm text-muted-foreground">Updating existing strategy. Rename below or keep the current name.</p>
+        {/if}
         <div class="space-y-1">
           <Label for="strategyName">Strategy name</Label>
           <Input id="strategyName" bind:value={saveName} placeholder="My DCA Strategy" />
         </div>
         <div class="flex justify-end gap-2">
           <Button variant="outline" onclick={() => showSave = false}>Cancel</Button>
-          <Button onclick={saveStrategy} disabled={!saveName.trim()}>Save</Button>
+          <Button onclick={saveStrategy} disabled={!saveName.trim() || isSaving}>{isSaving ? 'Saving…' : loadedStrategyId ? 'Update' : 'Save'}</Button>
         </div>
       </div>
     </div>
@@ -1593,6 +1648,23 @@
               oninput={(e) =>
                 updateNodeParam(selected.id, 'timeframe', (e.currentTarget as HTMLInputElement).value)
               }
+            />
+          </div>
+        {/if}
+
+        {#if selected.type === 'Buy'}
+          <div class="space-y-2">
+            <Label for="buyAmount">Amount (units)</Label>
+            <Input
+              id="buyAmount"
+              type="number"
+              min="1"
+              step="1"
+              value={String(selected.params.amount ?? 10)}
+              oninput={(e) => {
+                const v = parseFloat((e.currentTarget as HTMLInputElement).value);
+                if (!isNaN(v) && v > 0) updateNodeParam(selected.id, 'amount', v);
+              }}
             />
           </div>
         {/if}

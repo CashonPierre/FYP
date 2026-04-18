@@ -7,3 +7,4 @@ class PayloadEnum(UpperStrEnum):
 
     VERIFICATION = auto()
     LOGIN = auto()
+    PASSWORD_RESET = auto()

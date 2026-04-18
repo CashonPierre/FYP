@@ -1,4 +1,3 @@
-import { toast } from 'svelte-sonner';
 import type { AuthResponse } from '$lib/types/auth.js';
 
 export const loginUser = async (email: string, password: string): Promise<AuthResponse> => {
@@ -54,22 +53,25 @@ export const signupUser = async (
   };
 };
 
+const BACKEND = 'http://localhost:8000';
+
 export const resetPassword = async (email: string): Promise<AuthResponse> => {
-
-  // replace with the real api call
-  await new Promise(resolve => setTimeout(resolve, 1000));
-
   if (!email) {
-    return {
-      success: false,
-      message: 'Please enter your email address'
-    };
+    return { success: false, message: 'Please enter your email address' };
   }
-
-  return {
-    success: true,
-    message: 'Password reset instructions sent to your email'
-  };
+  try {
+    const res = await fetch(`${BACKEND}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) {
+      return { success: false, message: 'Something went wrong. Please try again.' };
+    }
+    return { success: true, message: 'If that email is registered you will receive a reset link shortly.' };
+  } catch {
+    return { success: false, message: 'Could not reach server. Please try again.' };
+  }
 };
 
 // Form validation

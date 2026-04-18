@@ -46,7 +46,8 @@ def create_jwt_token(data: BaseModel) -> str:
     )
 
 
-def verify_jwt_token(token: str) -> str:
+def verify_jwt_token(token: str, expected_what: str | None = None) -> str:
+    from app_common.enums import PayloadEnum
     try:
         payload = jwt.decode(
             jwt=token,
@@ -61,4 +62,8 @@ def verify_jwt_token(token: str) -> str:
     sub = payload.get("sub")
     if not isinstance(sub, str) or not sub:
         raise TokenError(message="Invalid verification token")
+
+    if expected_what is not None and payload.get("what") != expected_what:
+        raise TokenError(message="Invalid token type")
+
     return sub

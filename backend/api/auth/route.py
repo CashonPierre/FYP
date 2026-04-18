@@ -9,6 +9,8 @@ from configs.config_loader import settings
 from .security import (
     authenticate_user,
     generate_verify_url,
+    generate_reset_url,
+    hash_password,
 )
 from .dependencies import get_current_user
 from .schemas import (
@@ -18,6 +20,8 @@ from .schemas import (
     UserCreate,
     LoginRequest,
     AccessToken,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
 )
 from background.tasks import send_email_task
 from background.tasks.email import send_email
@@ -174,7 +178,7 @@ def verify_email(
     token: str, session: Session = Depends(dependency=get_session)
 ) -> Response:
     """verify email using the token link"""
-    user_id: str = verify_jwt_token(token=token)
+    user_id: str = verify_jwt_token(token=token, expected_what=PayloadEnum.VERIFICATION)
 
     user: User | None = get_user_by_id(session=session, user_id=user_id)
     if not user:
@@ -188,3 +192,60 @@ def verify_email(
     return Response(
         status_code=status.HTTP_200_OK, content="Email verified successfully"
     )
+
+
+@auth_router.post(path="/forgot-password", status_code=status.HTTP_200_OK)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    session: Session = Depends(dependency=get_session),
+) -> Response:
+    """Request a password reset link. Always returns 200 to avoid leaking which emails exist."""
+    user: User | None = get_user_by_email(session=session, email=payload.email)
+    if user:
+        now, exp = get_time_tuple(rememberMe=False)
+        token_data = JwtToken(
+            sub=str(user.id),
+            what=PayloadEnum.PASSWORD_RESET,
+            exp=exp,
+            iat=now,
+        )
+        token: str = create_jwt_token(data=token_data)
+        reset_url: str = generate_reset_url(token=token)
+
+        if settings.debug or not settings.resend_api_key:
+            send_email(
+                subject="Reset your password",
+                to_email=user.email,
+                body=f"Click here to reset your password:\n\n{reset_url}\n\nThis link expires in {settings.access_token_expire_hour} hours.",
+            )
+        else:
+            send_email_task.delay(
+                subject="Reset your password",
+                to_email=user.email,
+                body=f"Click here to reset your password:\n\n{reset_url}\n\nThis link expires in {settings.access_token_expire_hour} hours.",
+            )
+
+    return Response(
+        status_code=status.HTTP_200_OK,
+        content="If that email is registered you will receive a reset link shortly.",
+    )
+
+
+@auth_router.post(path="/reset-password", status_code=status.HTTP_200_OK)
+def reset_password(
+    payload: ResetPasswordRequest,
+    session: Session = Depends(dependency=get_session),
+) -> Response:
+    """Reset the user's password using the token from the reset email."""
+    user_id: str = verify_jwt_token(token=payload.token, expected_what=PayloadEnum.PASSWORD_RESET)
+
+    user: User | None = get_user_by_id(session=session, user_id=user_id)
+    if not user:
+        raise NotFoundError(message="User not found")
+
+    if not payload.new_password or len(payload.new_password) < 8:
+        raise InvalidCredentialsError(message="Password must be at least 8 characters")
+
+    user.hashed_password = hash_password(payload.new_password)
+    session.add(user)
+    return Response(status_code=status.HTTP_200_OK, content="Password reset successfully")

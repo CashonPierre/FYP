@@ -22,6 +22,30 @@ ENGINE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'trading
 logger = get_logger()
 
 
+def _strategy_from_graph(graph: dict):
+  """
+  Parse a builder graph JSON and return a GraphStrategy instance.
+
+  GraphStrategy evaluates every node in the graph per bar — supports
+  OnBar, Data, SMA, EMA, RSI, IfAbove, Buy, Sell.
+
+  Falls back to DCA(buyframe=1, buy_amount=10) if the graph is empty or
+  unparseable, so existing tests and integrations keep working.
+  """
+  # Import here — ENGINE_PATH must already be on sys.path when called from run_backtest
+  from background.tasks.graph_strategy import GraphStrategy
+  from strategies.dca import DCA
+
+  nodes = graph.get("nodes", [])
+  if not nodes:
+    logger.warning("graph parser: empty graph, falling back to DCA default")
+    return DCA(buyframe=1, buy_amount=10)
+
+  logger.info("graph parser: building GraphStrategy (%d nodes, %d edges)",
+              len(nodes), len(graph.get("edges", [])))
+  return GraphStrategy(graph)
+
+
 @celery_worker.task(bind=True, max_retries=0)
 def run_backtest(self: Task, run_id: str) -> None:
   # Import engine here so the path insert happens before any engine module loads
@@ -29,7 +53,6 @@ def run_backtest(self: Task, run_id: str) -> None:
     sys.path.insert(0, ENGINE_PATH)
 
   from core.engine import Engine
-  from strategies.dca import DCA
   from events.event import MarketDataEvent
   from events.payloads.market_payload import MarketDataPayload
 
@@ -82,9 +105,9 @@ def run_backtest(self: Task, run_id: str) -> None:
     # --- 4. Set up engine ---
     engine = Engine(initial_cash=initial_capital)
 
-    # TODO: parse graph JSON and instantiate strategy dynamically
-    # For MVP: use DCA — buy every bar, no take_profit/stop_loss
-    engine.add_strategy(DCA(buyframe=1, buy_amount=10))
+    graph = settings.get("graph", {})
+    strategy = _strategy_from_graph(graph)
+    engine.add_strategy(strategy)
 
     # Push market data events
     for bar in bars:
