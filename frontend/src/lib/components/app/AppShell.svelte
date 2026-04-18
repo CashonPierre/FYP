@@ -25,8 +25,8 @@
   <header class="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
     <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <div class="flex h-14 items-center justify-between gap-4">
-        <a href="/home" class="font-semibold tracking-tight">
-          Backtest UI
+        <a href="/" class="font-semibold tracking-tight">
+          Quant Backtester
         </a>
 
         <nav class="hidden items-center gap-1 sm:flex">

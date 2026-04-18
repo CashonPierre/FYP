@@ -1,60 +1,142 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { Button } from '$lib/components/ui/button/index.js';
+
+  let loggedIn = $state(false);
+
+  onMount(() => {
+    loggedIn = !!localStorage.getItem('token');
+  });
+
+  const primaryCta = () => goto(loggedIn ? '/app/backtests/new' : '/signup');
+  const secondaryCta = () => goto(loggedIn ? '/app/backtests' : '/login');
 </script>
 
 <div class="flex min-h-screen flex-col">
-  <!-- Nav -->
-  <header class="flex items-center justify-between px-8 py-4 border-b">
-    <span class="font-semibold tracking-tight">Quant Backtester</span>
+  <header class="flex items-center justify-between border-b px-8 py-4">
+    <a href="/" class="font-semibold tracking-tight">Quant Backtester</a>
     <div class="flex items-center gap-3">
-      <Button variant="ghost" onclick={() => goto('/login')}>Log in</Button>
-      <Button onclick={() => goto('/signup')}>Get started</Button>
+      {#if loggedIn}
+        <Button onclick={() => goto('/app/backtests/new')}>Open app</Button>
+      {:else}
+        <Button variant="ghost" onclick={() => goto('/login')}>Log in</Button>
+        <Button onclick={() => goto('/signup')}>Get started</Button>
+      {/if}
     </div>
   </header>
 
-  <!-- Hero -->
-  <main class="flex flex-1 flex-col items-center justify-center px-6 text-center gap-6">
-    <div class="max-w-2xl space-y-4">
-      <h1 class="text-4xl font-bold tracking-tight sm:text-5xl">
-        Build and backtest trading strategies — visually
-      </h1>
-      <p class="text-lg text-muted-foreground">
-        Drag-and-drop strategy blocks, run backtests against historical market data,
-        and analyse results with charts and performance metrics. No coding required.
-      </p>
-      <div class="flex items-center justify-center gap-3 pt-2">
-        <Button size="lg" onclick={() => goto('/signup')}>Get started free</Button>
-        <Button size="lg" variant="outline" onclick={() => goto('/login')}>Log in</Button>
+  <main class="flex flex-1 flex-col">
+    <section class="mx-auto grid w-full max-w-6xl items-center gap-10 px-6 py-16 md:grid-cols-2 md:py-24">
+      <div class="space-y-5">
+        <span class="inline-block rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground">
+          Final Year Project · No-code backtesting
+        </span>
+        <h1 class="text-4xl font-bold tracking-tight sm:text-5xl">
+          Build and backtest trading strategies — visually.
+        </h1>
+        <p class="text-lg text-muted-foreground">
+          Drag-and-drop strategy blocks, run them against historical market data,
+          and analyse results with candlestick charts, equity curves, and trade tables.
+        </p>
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <Button size="lg" onclick={primaryCta}>
+            {loggedIn ? 'Open builder' : 'Get started free'}
+          </Button>
+          <Button size="lg" variant="outline" onclick={secondaryCta}>
+            {loggedIn ? 'View history' : 'Log in'}
+          </Button>
+        </div>
       </div>
-    </div>
+
+      <div class="rounded-xl border bg-card p-4 shadow-sm">
+        <svg viewBox="0 0 480 300" class="h-full w-full" aria-hidden="true">
+          <rect x="8" y="8" width="120" height="284" rx="8" fill="var(--muted)" opacity="0.4" />
+          <text x="20" y="30" font-size="11" fill="var(--muted-foreground)">Palette</text>
+          {#each ['OnBar', 'SMA', 'RSI', 'IfAbove', 'Buy', 'Sell'] as label, i (label)}
+            <rect x="20" y={50 + i * 34} width="96" height="24" rx="4"
+              fill="var(--background)" stroke="var(--border)" />
+            <text x="30" y={66 + i * 34} font-size="11" fill="var(--foreground)">{label}</text>
+          {/each}
+
+          <rect x="140" y="8" width="332" height="284" rx="8" fill="var(--background)" stroke="var(--border)" />
+          <rect x="170" y="40" width="110" height="50" rx="6" fill="var(--primary)" opacity="0.15" stroke="var(--primary)" />
+          <text x="185" y="70" font-size="12" font-weight="600" fill="var(--primary)">OnBar</text>
+
+          <rect x="310" y="40" width="110" height="50" rx="6" fill="var(--chart-2)" opacity="0.2" stroke="var(--chart-2)" />
+          <text x="332" y="70" font-size="12" font-weight="600" fill="var(--chart-2)">RSI &lt; 30</text>
+
+          <rect x="170" y="150" width="110" height="50" rx="6" fill="var(--chart-2)" opacity="0.2" stroke="var(--chart-2)" />
+          <text x="195" y="180" font-size="12" font-weight="600" fill="var(--chart-2)">Buy 100%</text>
+
+          <rect x="310" y="150" width="110" height="50" rx="6" fill="var(--destructive)" opacity="0.15" stroke="var(--destructive)" />
+          <text x="335" y="180" font-size="12" font-weight="600" fill="var(--destructive)">Sell 100%</text>
+
+          <path d="M 280 65 L 310 65" stroke="var(--muted-foreground)" stroke-width="1.5" fill="none" />
+          <path d="M 225 90 L 225 150" stroke="var(--muted-foreground)" stroke-width="1.5" fill="none" />
+          <path d="M 365 90 L 365 150" stroke="var(--muted-foreground)" stroke-width="1.5" fill="none" />
+
+          <path d="M 160 260 L 190 240 L 220 250 L 250 225 L 280 232 L 310 215 L 340 220 L 370 205 L 400 210 L 430 195 L 460 200"
+            fill="none" stroke="var(--primary)" stroke-width="2" />
+        </svg>
+      </div>
+    </section>
+
+    <section class="border-t bg-muted/30 px-6 py-14">
+      <div class="mx-auto max-w-5xl">
+        <h2 class="text-2xl font-semibold tracking-tight">How it works</h2>
+        <div class="mt-8 grid gap-6 sm:grid-cols-3">
+          {#each [
+            { step: '1', title: 'Build', body: 'Drop trigger, indicator, and action blocks onto the canvas and wire them together.' },
+            { step: '2', title: 'Backtest', body: 'Pick a symbol and date range, then run your strategy against real historical OHLC data.' },
+            { step: '3', title: 'Analyse', body: 'Review equity curve, trade log, and metrics like Sharpe, drawdown, and win rate.' },
+          ] as item (item.step)}
+            <div class="rounded-lg border bg-background p-5">
+              <div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+                {item.step}
+              </div>
+              <div class="mt-3 text-base font-semibold">{item.title}</div>
+              <p class="mt-1 text-sm text-muted-foreground">{item.body}</p>
+            </div>
+          {/each}
+        </div>
+      </div>
+    </section>
+
+    <section class="px-6 py-14">
+      <div class="mx-auto max-w-5xl">
+        <h2 class="text-2xl font-semibold tracking-tight">What you get</h2>
+        <div class="mt-8 grid gap-6 sm:grid-cols-3">
+          <div class="space-y-2">
+            <div class="text-sm font-semibold">Visual strategy builder</div>
+            <p class="text-sm text-muted-foreground">
+              No code. Connect blocks on a canvas to express entry, exit, and sizing rules.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <div class="text-sm font-semibold">Historical market data</div>
+            <p class="text-sm text-muted-foreground">
+              S&amp;P 500 daily OHLC bars from 2013–2018, stored in TimescaleDB for fast queries.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <div class="text-sm font-semibold">Results dashboard</div>
+            <p class="text-sm text-muted-foreground">
+              Candlestick chart with buy/sell markers, equity curve, and per-trade breakdown.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <!-- Feature strip -->
-  <section class="border-t px-8 py-12">
-    <div class="mx-auto grid max-w-4xl gap-8 sm:grid-cols-3">
-      <div class="space-y-2">
-        <div class="text-sm font-semibold">Visual Strategy Builder</div>
-        <p class="text-sm text-muted-foreground">
-          Connect trigger and action blocks on a canvas to define your strategy logic without writing code.
-        </p>
-      </div>
-      <div class="space-y-2">
-        <div class="text-sm font-semibold">Historical Backtesting</div>
-        <p class="text-sm text-muted-foreground">
-          Run strategies against S&P 500 OHLC data and get P/L, win rate, drawdown, and trade-by-trade results.
-        </p>
-      </div>
-      <div class="space-y-2">
-        <div class="text-sm font-semibold">Results Dashboard</div>
-        <p class="text-sm text-muted-foreground">
-          Candlestick charts with buy/sell markers, equity curve, and a full summary of every backtest run.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <footer class="border-t px-8 py-4 text-center text-xs text-muted-foreground">
-    Quant Backtester — Final Year Project
+  <footer class="border-t px-8 py-6 text-center text-xs text-muted-foreground">
+    Quant Backtester · Final Year Project ·
+    <a
+      class="underline hover:text-foreground"
+      href="https://github.com/Quant-Backtester/FYP"
+      target="_blank"
+      rel="noopener noreferrer"
+    >GitHub</a>
   </footer>
 </div>
