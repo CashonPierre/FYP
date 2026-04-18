@@ -47,10 +47,17 @@ logger = logging.getLogger("graph_strategy")
 # ---------------------------------------------------------------------------
 
 def _node_param(node: dict, key: str, default: Any = None) -> Any:
-  """Read a parameter from node.data.params or node.params (both layouts used)."""
-  data_params = node.get("data", {}).get("params", {}) or {}
+  """Read a parameter from node.data.params, node.data (flat), or node.params.
+
+  The frontend serialises params as ``data: { period: 10 }`` (flat under
+  ``data``), while some internal/test callers use ``data: { params: {...} }``
+  or a top-level ``params`` dict.  All three layouts are tried in order.
+  """
+  data = node.get("data", {}) or {}
+  data_params = data.get("params", {}) or {}
   flat_params = node.get("params", {}) or {}
-  return data_params.get(key, flat_params.get(key, default))
+  # Priority: data.params > data (flat) > params
+  return data_params.get(key, data.get(key, flat_params.get(key, default)))
 
 
 def _node_data_field(node: dict, key: str, default: Any = None) -> Any:
@@ -101,9 +108,10 @@ class GraphStrategy:
     self._input_map: dict[tuple[str, str], tuple[str, str]] = {}
     for e in self._edges:
       src = e.get("source", "")
-      src_h = e.get("sourceHandle") or "out"
+      # Accept both camelCase (internal) and snake_case (frontend serialisation)
+      src_h = e.get("sourceHandle") or e.get("source_handle") or "out"
       tgt = e.get("target", "")
-      tgt_h = e.get("targetHandle") or "in"
+      tgt_h = e.get("targetHandle") or e.get("target_handle") or "in"
       if src in self._nodes and tgt in self._nodes:
         self._input_map[(tgt, tgt_h)] = (src, src_h)
 

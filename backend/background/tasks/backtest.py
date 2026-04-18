@@ -46,13 +46,63 @@ def _strategy_from_graph(graph: dict, ohlcv_df=None):
   return GraphStrategy(graph, ohlcv_df=ohlcv_df)
 
 
-@celery_worker.task(bind=True, max_retries=0)
-def run_backtest(self: Task, run_id: str) -> None:
-  # Import engine here so the path insert happens before any engine module loads
+def _make_engine(initial_cash: float):
+  """
+  Return a patched Engine that handles CloseSignal(order_id=None).
+
+  The engine's default close_position(symbol, order_id=None) calls
+  positions.pop(None) which always returns None, so positions are never
+  closed and portfolio._trades stays empty.
+
+  This subclass falls back to close_positions() (close all open positions
+  for the symbol) whenever order_id is None.
+  """
   if ENGINE_PATH not in sys.path:
     sys.path.insert(0, ENGINE_PATH)
 
   from core.engine import Engine
+  from events.event import MarketDataEvent
+  from strategies.signal import CloseSignal
+
+  class _PatchedEngine(Engine):
+    def _run_strategies(self, event):
+      for signal in self._strategy_handler.run_all_strategy(event=event):
+        if isinstance(signal, CloseSignal) and isinstance(event, MarketDataEvent):
+          if signal.order_id is None:
+            # Close ALL open positions for this symbol (handles order_id=None)
+            closed_list = self._positionManager.close_positions(
+              symbol=event.payload.symbol
+            )
+            for closed in closed_list:
+              self._portfolio.add_trade(
+                order_fill=closed,
+                current_price=event.payload.price,
+                exit_timestamp=self._clock.now,
+              )
+          else:
+            closed = self._positionManager.close_position(
+              symbol=event.payload.symbol,
+              order_id=signal.order_id,
+            )
+            if closed:
+              self._portfolio.add_trade(
+                order_fill=closed,
+                current_price=event.payload.price,
+                exit_timestamp=self._clock.now,
+              )
+        else:
+          self._orderManager.handle_signal(
+            signal=signal, time=self._clock.now
+          )
+
+  return _PatchedEngine(initial_cash=initial_cash)
+
+
+@celery_worker.task(bind=True, max_retries=0)
+def run_backtest(self: Task, run_id: str) -> None:
+  if ENGINE_PATH not in sys.path:
+    sys.path.insert(0, ENGINE_PATH)
+
   from events.event import MarketDataEvent
   from events.payloads.market_payload import MarketDataPayload
 
@@ -103,7 +153,7 @@ def run_backtest(self: Task, run_id: str) -> None:
       raise ValueError(f"No market data found for {symbol} ({timeframe})")
 
     # --- 4. Set up engine ---
-    engine = Engine(initial_cash=initial_capital)
+    engine = _make_engine(initial_cash=initial_capital)
 
     graph = settings.get("graph", {})
 
@@ -208,6 +258,10 @@ def run_backtest(self: Task, run_id: str) -> None:
     session.commit()
     logger.info(f"Backtest {run_id} completed successfully")
 
+    # Update parent batch status if this run belongs to one
+    if run.batch_id:
+      _refresh_batch_status(session, run.batch_id)
+
   except Exception as e:
     logger.error(f"Backtest {run_id} failed: {e}")
     try:
@@ -215,6 +269,8 @@ def run_backtest(self: Task, run_id: str) -> None:
       run.error_message = str(e)
       run.ended_at = datetime.now(timezone.utc)
       session.commit()
+      if run.batch_id:
+        _refresh_batch_status(session, run.batch_id)
     except Exception:
       session.rollback()
     raise
@@ -223,4 +279,43 @@ def run_backtest(self: Task, run_id: str) -> None:
     session.close()
 
 
+def _refresh_batch_status(session, batch_id) -> None:
+  """Wrapper to avoid circular import: import repositories at call time."""
+  from api.backtests.repositories import update_batch_status_from_runs
+  update_batch_status_from_runs(session, batch_id)
+  session.commit()
+
+
+@celery_worker.task(bind=True, max_retries=0)
+def run_backtest_batch(self: Task, batch_id: str) -> None:
+  """Mark the batch as running and fan out one run_backtest task per child run."""
+  from api.backtests.repositories import get_batch_by_id, get_runs_by_batch
+
+  session = SessionLocal()
+  try:
+    batch = get_batch_by_id(session, uuid.UUID(batch_id))
+    if not batch:
+      logger.error(f"BacktestBatch {batch_id} not found")
+      return
+
+    batch.status = "running"
+    batch.started_at = datetime.now(timezone.utc)
+    session.commit()
+
+    runs = get_runs_by_batch(session, batch.id)
+    for run in runs:
+      run_backtest.delay(str(run.id))
+
+    logger.info(f"BacktestBatch {batch_id} dispatched {len(runs)} run(s)")
+
+  except Exception as e:
+    logger.error(f"BacktestBatch {batch_id} failed to start: {e}")
+    session.rollback()
+    raise
+
+  finally:
+    session.close()
+
+
 run_backtest_task: Task = cast(Task, run_backtest)
+run_backtest_batch_task: Task = cast(Task, run_backtest_batch)

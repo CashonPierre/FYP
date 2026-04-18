@@ -1,4 +1,5 @@
 import type { AuthResponse } from '$lib/types/auth.js';
+import { BACKEND } from '$lib/config.js';
 
 export const loginUser = async (email: string, password: string): Promise<AuthResponse> => {
   await new Promise(resolve => setTimeout(resolve, 1000));
@@ -52,8 +53,6 @@ export const signupUser = async (
     }
   };
 };
-
-const BACKEND = 'http://localhost:8000';
 
 export const resetPassword = async (email: string): Promise<AuthResponse> => {
   if (!email) {

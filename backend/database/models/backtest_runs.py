@@ -22,6 +22,10 @@ class BacktestRun(Base):
   strategy_id: Mapped[uuid.UUID | None] = mapped_column(
     Uuid(as_uuid=True), ForeignKey("strategies.id"), nullable=True
   )
+  # Parent batch — NULL for legacy single-symbol runs created before batching
+  batch_id: Mapped[uuid.UUID | None] = mapped_column(
+    Uuid(as_uuid=True), ForeignKey("backtest_batches.id"), nullable=True, index=True
+  )
   # queued | running | completed | failed
   status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)
   # JSON: { symbol, timeframe, startDate, endDate, initialCapital, feesBps, slippageBps, graph }

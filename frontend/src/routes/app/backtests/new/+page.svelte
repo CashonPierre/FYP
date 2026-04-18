@@ -8,6 +8,7 @@
   import * as Alert from '$lib/components/ui/alert/index.js';
   import { cn } from '$lib/utils.js';
   import { toast } from 'svelte-sonner';
+  import { BACKEND } from '$lib/config.js';
 
   type NodeType =
     | 'OnBar'
@@ -104,8 +105,8 @@
   let exportJson = $state('');
   let importJson = $state('');
   let targetSymbol = $state('AAPL');
-  let periodStart = $state(''); // YYYY-MM-DD (blank = full available range)
-  let periodEnd = $state(''); // YYYY-MM-DD (blank = full available range)
+  let periodStart = $state('2013-01-01'); // YYYY-MM-DD — dense S&P 500 data starts here
+  let periodEnd = $state('2018-12-31');   // YYYY-MM-DD — dense data ends here; clear for full range
   const importPlaceholder =
     '{\n' +
     '  "version": 0,\n' +
@@ -976,7 +977,7 @@
     }
   });
 
-  const BACKEND = 'http://localhost:8000';
+
 
   // --- Save / Load strategy ---
   let showSave = $state(false);

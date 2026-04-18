@@ -8,10 +8,11 @@ from sqlalchemy.orm import Session
 
 # Custom
 from database.make_db import get_session
-from database.models import BacktestRun, RunMetrics, Trade, OhlcBar
+from database.models import BacktestRun, BacktestBatch, RunMetrics, Trade, OhlcBar
 from api.auth.dependencies import get_current_user
 from api.auth.schemas import CurrentUser
 from api.auth.repositories import get_user_by_email
+from api.market.universes import get_universe_symbols
 from app_common.exceptions import NotFoundError
 from .schemas import (
   BacktestCreate,
@@ -24,11 +25,17 @@ from .schemas import (
   OhlcPoint,
   EquityPoint,
   TradePoint,
+  BatchStatus,
+  BatchRunSummary,
+  BatchAggregate,
 )
-from background.tasks import run_backtest_task
+from background.tasks import run_backtest_batch_task
 from .repositories import (
+  create_batch,
   create_backtest_run,
+  get_batch_by_id,
   get_run_by_id,
+  get_runs_by_batch,
   get_runs_by_user,
   get_metrics_by_run,
   get_trades_by_run,
@@ -47,22 +54,57 @@ def submit_backtest(
   current_user: CurrentUser = Depends(get_current_user),
   session: Session = Depends(get_session),
 ) -> BacktestSubmitted:
-  """Submit a new backtest job."""
+  """Submit a new backtest job (single or multi-symbol)."""
   user = get_user_by_email(session=session, email=current_user.email)
   if not user:
     raise NotFoundError(message="User not found")
 
-  settings_json = payload.model_dump()
-  run = create_backtest_run(
+  # --- Resolve symbol list ---
+  if payload.universe:
+    try:
+      symbols = get_universe_symbols(payload.universe)
+    except KeyError:
+      from fastapi import HTTPException
+      raise HTTPException(status_code=400, detail=f"Unknown universe: {payload.universe}")
+  elif payload.symbols:
+    symbols = payload.symbols
+  else:
+    symbols = [payload.settings.symbol]  # type: ignore[list-item]
+
+  # --- Create batch + one run per symbol ---
+  base_settings = payload.model_dump()
+  batch = create_batch(
     session=session,
     user_id=user.id,
-    settings_json=settings_json,
+    symbols=symbols,
+    settings_json=base_settings,
   )
 
-  # Enqueue backtest in background
-  run_backtest_task.delay(str(run.id))
+  runs: list[BacktestRun] = []
+  for sym in symbols:
+    # Each run gets its own settings with the concrete symbol
+    run_settings = json.loads(json.dumps(base_settings))  # deep copy
+    run_settings["settings"]["symbol"] = sym
+    run = create_backtest_run(
+      session=session,
+      user_id=user.id,
+      settings_json=run_settings,
+      batch_id=batch.id,
+    )
+    runs.append(run)
 
-  return BacktestSubmitted(id=run.id, status=run.status)
+  session.commit()
+
+  # Dispatch single batch task — it fans out run_backtest per child run
+  run_backtest_batch_task.delay(str(batch.id))
+
+  is_multi = len(symbols) > 1
+  return BacktestSubmitted(
+    id=batch.id if is_multi else runs[0].id,
+    status="queued",
+    batch_id=batch.id,
+    run_ids=[r.id for r in runs] if is_multi else [],
+  )
 
 
 @backtest_router.get(
@@ -92,6 +134,7 @@ def list_backtests(
       timeframe=settings.get("settings", {}).get("timeframe", "1D"),
       created_at=run.created_at,
       total_return=metrics.total_return if metrics else None,
+      batch_id=run.batch_id,
     ))
 
   return result
@@ -213,4 +256,79 @@ def get_backtest_results(
       trades=trade_points,
       equity=[],  # TODO: populate from equity_curve table once implemented
     ),
+  )
+
+
+@backtest_router.get(
+  path="/batch/{batch_id}",
+  response_model=BatchStatus,
+  status_code=status.HTTP_200_OK,
+)
+def get_batch_status(
+  batch_id: uuid.UUID,
+  current_user: CurrentUser = Depends(get_current_user),
+  session: Session = Depends(get_session),
+) -> BatchStatus:
+  """Get status and per-symbol results for a multi-asset batch."""
+  batch: BacktestBatch | None = get_batch_by_id(session=session, batch_id=batch_id)
+  if not batch:
+    raise NotFoundError(message="Backtest batch not found")
+
+  runs = get_runs_by_batch(session=session, batch_id=batch_id)
+  symbols = json.loads(batch.symbols_json)
+
+  run_summaries: list[BatchRunSummary] = []
+  returns: list[float] = []
+
+  for run in runs:
+    run_settings = json.loads(run.settings_json)
+    sym = run_settings.get("settings", {}).get("symbol", "")
+    metrics = get_metrics_by_run(session=session, run_id=run.id)
+
+    total_return = metrics.total_return if metrics else None
+    if total_return is not None:
+      returns.append(total_return)
+
+    run_summaries.append(BatchRunSummary(
+      run_id=run.id,
+      symbol=sym,
+      status=run.status,
+      total_return=total_return,
+      max_drawdown=metrics.max_drawdown if metrics else None,
+      sharpe=metrics.sharpe if metrics else None,
+      total_trades=metrics.total_trades if metrics else None,
+      error_message=run.error_message,
+    ))
+
+  # Aggregate stats
+  status_counts = {"completed": 0, "failed": 0, "running": 0, "queued": 0}
+  for r in run_summaries:
+    key = r.status if r.status in status_counts else "queued"
+    status_counts[key] += 1
+
+  best_run = max(run_summaries, key=lambda r: r.total_return or float("-inf"), default=None)
+  worst_run = min(run_summaries, key=lambda r: r.total_return or float("inf"), default=None)
+
+  aggregate = BatchAggregate(
+    total_symbols=len(symbols),
+    completed=status_counts["completed"],
+    failed=status_counts["failed"],
+    running=status_counts["running"],
+    queued=status_counts["queued"],
+    best_symbol=best_run.symbol if best_run and best_run.total_return is not None else None,
+    best_return=best_run.total_return if best_run else None,
+    worst_symbol=worst_run.symbol if worst_run and worst_run.total_return is not None else None,
+    worst_return=worst_run.total_return if worst_run else None,
+    avg_return=sum(returns) / len(returns) if returns else None,
+  )
+
+  return BatchStatus(
+    id=batch.id,
+    status=batch.status,
+    symbols=symbols,
+    runs=run_summaries,
+    aggregate=aggregate,
+    created_at=batch.created_at,
+    started_at=batch.started_at,
+    ended_at=batch.ended_at,
   )

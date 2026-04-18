@@ -52,6 +52,7 @@ def fetch_and_upsert(
     symbol: str,
     timeframe: str = "1D",
     start: str | None = None,
+    end: str | None = None,
     session: Any = None,
 ) -> dict:
     """
@@ -62,6 +63,7 @@ def fetch_and_upsert(
     symbol    : ticker symbol (e.g. "AAPL", "BTC-USD")
     timeframe : DB timeframe label ("1D", "1W", "1M")
     start     : ISO date string override; if None, resumes from latest bar in DB
+    end       : ISO date string (exclusive upper bound); if None, fetches to today
     session   : SQLAlchemy session; if None, a new SessionLocal() is opened
 
     Returns
@@ -95,15 +97,17 @@ def fetch_and_upsert(
                 fetch_start = _DEFAULT_START
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if fetch_start >= today:
+        fetch_end = end or today
+        if fetch_start >= fetch_end:
             logger.info("refresh %s %s: already up to date", symbol, timeframe)
             return {"symbol": symbol, "timeframe": timeframe, "rows_upserted": 0, "fetch_start": fetch_start}
 
         # --- Fetch from yfinance ---
-        logger.info("refresh %s %s: fetching from %s", symbol, timeframe, fetch_start)
+        logger.info("refresh %s %s: fetching %s → %s", symbol, timeframe, fetch_start, fetch_end)
         ticker = yf.Ticker(symbol)
         df = ticker.history(
             start=fetch_start,
+            end=fetch_end,
             interval=yf_interval,
             auto_adjust=True,
             actions=False,
@@ -176,13 +180,14 @@ def refresh_symbol_ohlc(
     symbol: str,
     timeframe: str = "1D",
     start: str | None = None,
+    end: str | None = None,
 ) -> dict:
     """
     Celery task: fetch + upsert one symbol.
     Retries up to 3 times on failure (yfinance network errors, etc.).
     """
     try:
-        return fetch_and_upsert(symbol=symbol, timeframe=timeframe, start=start)
+        return fetch_and_upsert(symbol=symbol, timeframe=timeframe, start=start, end=end)
     except Exception as exc:
         logger.error("refresh_symbol_ohlc %s failed: %s", symbol, exc)
         raise self.retry(exc=exc)

@@ -3,13 +3,15 @@ import uuid
 from datetime import datetime
 
 # External
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
-# --- Request ---
+# ---------------------------------------------------------------------------
+# Request
+# ---------------------------------------------------------------------------
 
 class BacktestSettings(BaseModel):
-  symbol: str
+  symbol: str | None = None      # single-symbol (optional when symbols/universe given)
   timeframe: str = "1D"
   start_date: str | None = None
   end_date: str | None = None
@@ -42,13 +44,28 @@ class BacktestCreate(BaseModel):
   version: int = 0
   settings: BacktestSettings
   graph: StrategyGraph
+  # Multi-asset extensions — at least one of symbol/symbols/universe must be present
+  symbols: list[str] | None = None   # explicit symbol list
+  universe: str | None = None        # named universe key
+
+  @model_validator(mode="after")
+  def require_symbol_source(self):
+    has_single = bool(self.settings.symbol)
+    has_multi = bool(self.symbols) or bool(self.universe)
+    if not has_single and not has_multi:
+      raise ValueError("Provide settings.symbol, symbols list, or universe key")
+    return self
 
 
-# --- Response ---
+# ---------------------------------------------------------------------------
+# Single-run response (backward-compat)
+# ---------------------------------------------------------------------------
 
 class BacktestSubmitted(BaseModel):
-  id: uuid.UUID
+  id: uuid.UUID          # run_id for single-symbol; batch_id for multi
   status: str
+  batch_id: uuid.UUID | None = None   # set when a batch was created
+  run_ids: list[uuid.UUID] = []       # populated for multi-symbol batches
 
 
 class BacktestStatus(BaseModel):
@@ -116,3 +133,46 @@ class BacktestListItem(BaseModel):
   timeframe: str
   created_at: datetime
   total_return: float | None = None
+  batch_id: uuid.UUID | None = None
+
+
+# ---------------------------------------------------------------------------
+# Batch response
+# ---------------------------------------------------------------------------
+
+class BatchRunSummary(BaseModel):
+  """Summary of one symbol's run within a batch."""
+  run_id: uuid.UUID
+  symbol: str
+  status: str
+  total_return: float | None = None
+  max_drawdown: float | None = None
+  sharpe: float | None = None
+  total_trades: int | None = None
+  error_message: str | None = None
+
+
+class BatchAggregate(BaseModel):
+  """Aggregate statistics across all runs in the batch."""
+  total_symbols: int
+  completed: int
+  failed: int
+  running: int
+  queued: int
+  best_symbol: str | None = None
+  best_return: float | None = None
+  worst_symbol: str | None = None
+  worst_return: float | None = None
+  avg_return: float | None = None
+
+
+class BatchStatus(BaseModel):
+  """Full batch status + per-symbol results."""
+  id: uuid.UUID
+  status: str
+  symbols: list[str]
+  runs: list[BatchRunSummary]
+  aggregate: BatchAggregate
+  created_at: datetime
+  started_at: datetime | None = None
+  ended_at: datetime | None = None

@@ -16,9 +16,15 @@ from app_common.exceptions import AppError
 
 
 def register_middleawre(app: FastAPI) -> None:
+    # In dev mode allow any localhost port (Vite picks 5173/5174/5175/... depending
+    # on what's free).  In production ALLOWED_ORIGIN env var locks it down to the
+    # real domain; allow_origin_regex is left unset.
+    origin_regex = r"http://localhost:\d+" if settings.debug else None
+
     app.add_middleware(
         middleware_class=CORSMiddleware,
         allow_origins=settings.allowed_origin,
+        allow_origin_regex=origin_regex,
         allow_credentials=True,
         allow_methods=settings.allowed_methods,
         allow_headers=settings.allowed_headers,
@@ -62,6 +68,10 @@ if __name__ == "__main__":
 
     Base.metadata.create_all(bind=engine)
     app: FastAPI = create_app()
-    uvicorn.run(app=app, host=settings.app_host, port=settings.app_port)
+
+    # In production (DEBUG=false) bind to all interfaces so the reverse proxy
+    # (Railway / Fly / Render ingress) can reach the process.
+    host = "0.0.0.0" if not settings.debug else settings.app_host
+    uvicorn.run(app=app, host=host, port=settings.app_port)
 
     # run python server.py
