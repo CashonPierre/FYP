@@ -7,8 +7,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { toast } from 'svelte-sonner';
-
-  const BACKEND = 'http://localhost:8000';
+  import { BACKEND } from '$lib/config.js';
 
   const token = $derived($page.url.searchParams.get('token') ?? '');
 

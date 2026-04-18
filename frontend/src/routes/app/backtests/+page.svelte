@@ -4,8 +4,7 @@
   import { toast } from 'svelte-sonner';
   import { Button } from '$lib/components/ui/button/index.js';
   import * as Card from '$lib/components/ui/card/index.js';
-
-  const BACKEND = 'http://localhost:8000';
+  import { BACKEND } from '$lib/config.js';
 
   type RunStatus = 'queued' | 'running' | 'completed' | 'failed';
 

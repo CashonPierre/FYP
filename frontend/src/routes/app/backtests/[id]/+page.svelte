@@ -9,8 +9,7 @@
   import CandlestickChart, { type OhlcBar, type TradeMarker } from '$lib/components/charts/CandlestickChart.svelte';
   import EquityCurveChart, { type EquityPoint } from '$lib/components/charts/EquityCurveChart.svelte';
   import TradesTable from '$lib/components/charts/TradesTable.svelte';
-
-  const BACKEND = 'http://localhost:8000';
+  import { BACKEND } from '$lib/config.js';
 
   type RunStatus = 'queued' | 'running' | 'completed' | 'failed';
 

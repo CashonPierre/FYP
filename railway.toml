@@ -1,0 +1,7 @@
+[build]
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "uv run python server.py"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

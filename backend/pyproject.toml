@@ -8,16 +8,24 @@ version = "0.1.0"
 description = "A JWT-based authentication backend for trading applications"
 authors = [{ name = "Your Name", email = "you@example.com" }]
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.100.0",
   "uvicorn[standard]>=0.22.0",
   "sqlmodel>=0.0.14",
+  "sqlalchemy>=2.0.0",
+  "pydantic[email]>=2.0.0",
+  "pydantic-settings>=2.0.0",
   "pyjwt[crypto]>=2.8.0",
   "bcrypt>=4.0.0",
   "python-dotenv>=1.0.0",
   "alembic>=1.18.4",
+  "psycopg2-binary>=2.9.0",
+  "celery[redis]>=5.3.0",
   "resend>=2.29.0",
+  "yfinance>=0.2.55",
+  "pandas>=2.0.0",
+  "pandas-ta",
 ]
 
 [project.optional-dependencies]

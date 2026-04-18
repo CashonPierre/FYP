@@ -8,6 +8,7 @@
   import * as Alert from '$lib/components/ui/alert/index.js';
   import { cn } from '$lib/utils.js';
   import { toast } from 'svelte-sonner';
+  import { BACKEND } from '$lib/config.js';
 
   type NodeType =
     | 'OnBar'
@@ -15,7 +16,16 @@
     | 'SMA'
     | 'EMA'
     | 'RSI'
+    | 'MACD'
+    | 'BollingerBands'
+    | 'ATR'
+    | 'Volume'
+    | 'Stochastic'
     | 'IfAbove'
+    | 'IfBelow'
+    | 'IfCrossAbove'
+    | 'IfCrossBelow'
+    | 'Constant'
     | 'Buy'
     | 'Sell';
 
@@ -51,12 +61,26 @@
   };
 
   const palette: Array<{ type: NodeType; title: string; hint: string }> = [
+    // Triggers
     { type: 'OnBar', title: 'On Bar', hint: 'Trigger per bar' },
+    // Data sources
     { type: 'Data', title: 'Price Bars', hint: 'OHLCV input' },
+    { type: 'Constant', title: 'Constant', hint: 'Fixed numeric value (e.g. 30, 70)' },
+    // Indicators
     { type: 'SMA', title: 'SMA', hint: 'Simple moving average' },
     { type: 'EMA', title: 'EMA', hint: 'Exponential moving average' },
-    { type: 'RSI', title: 'RSI', hint: 'Relative strength index' },
-    { type: 'IfAbove', title: 'If A > B', hint: 'Branch on comparison' },
+    { type: 'RSI', title: 'RSI', hint: 'Relative strength index (0–100)' },
+    { type: 'MACD', title: 'MACD', hint: 'MACD line, signal, and histogram' },
+    { type: 'BollingerBands', title: 'Bollinger Bands', hint: 'Upper, middle, lower bands' },
+    { type: 'ATR', title: 'ATR', hint: 'Average True Range (volatility)' },
+    { type: 'Volume', title: 'Volume', hint: 'Bar volume as a number' },
+    { type: 'Stochastic', title: 'Stochastic', hint: 'Stochastic %K and %D oscillator' },
+    // Conditions
+    { type: 'IfAbove', title: 'If A > B', hint: 'True while A is above B' },
+    { type: 'IfBelow', title: 'If A < B', hint: 'True while A is below B' },
+    { type: 'IfCrossAbove', title: 'Cross Above', hint: 'Fires once when A crosses above B' },
+    { type: 'IfCrossBelow', title: 'Cross Below', hint: 'Fires once when A crosses below B' },
+    // Actions
     { type: 'Buy', title: 'Buy', hint: 'Enter position' },
     { type: 'Sell', title: 'Sell', hint: 'Exit position' },
   ];
@@ -81,8 +105,8 @@
   let exportJson = $state('');
   let importJson = $state('');
   let targetSymbol = $state('AAPL');
-  let periodStart = $state(''); // YYYY-MM-DD (blank = full available range)
-  let periodEnd = $state(''); // YYYY-MM-DD (blank = full available range)
+  let periodStart = $state('2013-01-01'); // YYYY-MM-DD — dense S&P 500 data starts here
+  let periodEnd = $state('2018-12-31');   // YYYY-MM-DD — dense data ends here; clear for full range
   const importPlaceholder =
     '{\n' +
     '  "version": 0,\n' +
@@ -152,7 +176,47 @@
           inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
           outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
         };
+      case 'ATR':
+        // ATR uses H/L/C from the OHLCV DataFrame — no wirable input needed
+        return {
+          inputs: [],
+          outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
+        };
+      case 'Volume':
+        return {
+          inputs: [],
+          outputs: [{ handle: 'out', label: 'volume', type: 'number', y: NODE_DEFAULT_PORT_Y }],
+        };
+      case 'MACD':
+        return {
+          inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
+          outputs: [
+            { handle: 'macd',      label: 'MACD',      type: 'number', y: 18 },
+            { handle: 'signal',    label: 'Signal',    type: 'number', y: 38 },
+            { handle: 'histogram', label: 'Histogram', type: 'number', y: 58 },
+          ],
+        };
+      case 'BollingerBands':
+        return {
+          inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
+          outputs: [
+            { handle: 'upper',  label: 'Upper',  type: 'number', y: 18 },
+            { handle: 'middle', label: 'Middle', type: 'number', y: 38 },
+            { handle: 'lower',  label: 'Lower',  type: 'number', y: 58 },
+          ],
+        };
+      case 'Stochastic':
+        return {
+          inputs: [],
+          outputs: [
+            { handle: 'k', label: '%K', type: 'number', y: 24 },
+            { handle: 'd', label: '%D', type: 'number', y: 52 },
+          ],
+        };
       case 'IfAbove':
+      case 'IfBelow':
+      case 'IfCrossAbove':
+      case 'IfCrossBelow':
         return {
           inputs: [
             { handle: 'in', label: 'event', type: 'event', y: 18 },
@@ -163,6 +227,11 @@
             { handle: 'true', label: 'true', type: 'event', y: 24 },
             { handle: 'false', label: 'false', type: 'event', y: 52 },
           ],
+        };
+      case 'Constant':
+        return {
+          inputs: [],
+          outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
         };
       case 'Buy':
       case 'Sell':
@@ -220,8 +289,18 @@
         return { period: 20 };
       case 'RSI':
         return { period: 14, overbought: 70, oversold: 30 };
+      case 'MACD':
+        return { fast: 12, slow: 26, signal: 9 };
+      case 'BollingerBands':
+        return { period: 20, std: 2 };
+      case 'ATR':
+        return { period: 14 };
+      case 'Stochastic':
+        return { k: 14, d: 3 };
       case 'Buy':
         return { amount: 10 };
+      case 'Constant':
+        return { value: 30 };
       case 'Data':
         return { timeframe: '1D' };
       default:
@@ -448,19 +527,43 @@
         }
       }
 
-      if (['SMA', 'EMA', 'RSI'].includes(node.type) && typeof node.params.period !== 'number') {
+      if (node.type === 'Constant' && (typeof node.params.value !== 'number' || isNaN(Number(node.params.value)))) {
+        issues.push({
+          level: 'error',
+          nodeId: node.id,
+          message: 'Constant value must be a number.',
+        });
+      }
+
+      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR'].includes(node.type) && typeof node.params.period !== 'number') {
         issues.push({
           level: 'error',
           nodeId: node.id,
           message: 'Period must be a number.',
         });
       }
-      if (['SMA', 'EMA', 'RSI'].includes(node.type) && Number(node.params.period) <= 0) {
+      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR'].includes(node.type) && Number(node.params.period) <= 0) {
         issues.push({
           level: 'error',
           nodeId: node.id,
           message: 'Period must be greater than 0.',
         });
+      }
+      if (node.type === 'MACD') {
+        const fast = Number(node.params.fast), slow = Number(node.params.slow);
+        if (!fast || !slow || fast <= 0 || slow <= 0) {
+          issues.push({ level: 'error', nodeId: node.id, message: 'MACD fast and slow periods must be positive numbers.' });
+        } else if (fast >= slow) {
+          issues.push({ level: 'error', nodeId: node.id, message: 'MACD fast period must be less than slow period.' });
+        }
+      }
+      if (node.type === 'Stochastic') {
+        if (!Number(node.params.k) || Number(node.params.k) <= 0) {
+          issues.push({ level: 'error', nodeId: node.id, message: 'Stochastic K period must be a positive number.' });
+        }
+        if (!Number(node.params.d) || Number(node.params.d) <= 0) {
+          issues.push({ level: 'error', nodeId: node.id, message: 'Stochastic D period must be a positive number.' });
+        }
       }
       if (node.type === 'OnBar' && typeof node.params.timeframe !== 'string') {
         issues.push({
@@ -533,14 +636,15 @@
   // Maximum warm-up bars required by any indicator node in the graph.
   // SMA/EMA/RSI need `period` bars before they can produce a value.
   const maxWarmupBars = $derived(
-    nodes
-      .filter((n) => ['SMA', 'EMA', 'RSI'].includes(n.type))
-      .reduce((max, n) => {
-        const period = Number(n.params.period) || 0;
-        // RSI needs period+1 prices (N changes require N+1 prices)
-        const needed = n.type === 'RSI' ? period + 1 : period;
-        return Math.max(max, needed);
-      }, 0)
+    nodes.reduce((max, n) => {
+      let needed = 0;
+      if (n.type === 'SMA' || n.type === 'EMA') needed = Number(n.params.period) || 0;
+      else if (n.type === 'RSI') needed = (Number(n.params.period) || 0) + 1;
+      else if (n.type === 'ATR' || n.type === 'BollingerBands') needed = Number(n.params.period) || 0;
+      else if (n.type === 'MACD') needed = (Number(n.params.slow) || 26) + (Number(n.params.signal) || 9) - 1;
+      else if (n.type === 'Stochastic') needed = (Number(n.params.k) || 14) + (Number(n.params.d) || 3);
+      return Math.max(max, needed);
+    }, 0)
   );
 
   const issueForSelected = $derived(
@@ -744,7 +848,16 @@
       'SMA',
       'EMA',
       'RSI',
+      'MACD',
+      'BollingerBands',
+      'ATR',
+      'Volume',
+      'Stochastic',
       'IfAbove',
+      'IfBelow',
+      'IfCrossAbove',
+      'IfCrossBelow',
+      'Constant',
       'Buy',
       'Sell',
     ];
@@ -864,7 +977,7 @@
     }
   });
 
-  const BACKEND = 'http://localhost:8000';
+
 
   // --- Save / Load strategy ---
   let showSave = $state(false);
@@ -1650,6 +1763,87 @@
               }
             />
           </div>
+        {/if}
+
+        {#if selected.type === 'Constant'}
+          <div class="space-y-2">
+            <Label for="constValue">Value</Label>
+            <Input
+              id="constValue"
+              type="number"
+              step="any"
+              value={String(selected.params.value ?? 30)}
+              oninput={(e) => {
+                const v = parseFloat((e.currentTarget as HTMLInputElement).value);
+                if (!isNaN(v)) updateNodeParam(selected.id, 'value', v);
+              }}
+            />
+            <p class="text-xs text-muted-foreground">
+              Common values: 30 (RSI oversold), 70 (RSI overbought), 50 (midline), 200 (MA period)
+            </p>
+          </div>
+        {/if}
+
+        {#if selected.type === 'MACD'}
+          <div class="grid grid-cols-3 gap-3">
+            <div class="space-y-2">
+              <Label for="macdFast">Fast</Label>
+              <Input id="macdFast" type="number" min="1" value={String(selected.params.fast ?? 12)}
+                oninput={(e) => updateNodeParam(selected.id, 'fast', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+            <div class="space-y-2">
+              <Label for="macdSlow">Slow</Label>
+              <Input id="macdSlow" type="number" min="1" value={String(selected.params.slow ?? 26)}
+                oninput={(e) => updateNodeParam(selected.id, 'slow', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+            <div class="space-y-2">
+              <Label for="macdSignal">Signal</Label>
+              <Input id="macdSignal" type="number" min="1" value={String(selected.params.signal ?? 9)}
+                oninput={(e) => updateNodeParam(selected.id, 'signal', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">Outputs: MACD line, Signal line, Histogram</p>
+        {/if}
+
+        {#if selected.type === 'BollingerBands'}
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label for="bbPeriod">Period</Label>
+              <Input id="bbPeriod" type="number" min="1" value={String(selected.params.period ?? 20)}
+                oninput={(e) => updateNodeParam(selected.id, 'period', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+            <div class="space-y-2">
+              <Label for="bbStd">Std Dev</Label>
+              <Input id="bbStd" type="number" min="0.1" step="0.1" value={String(selected.params.std ?? 2)}
+                oninput={(e) => updateNodeParam(selected.id, 'std', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">Outputs: Upper band, Middle (SMA), Lower band</p>
+        {/if}
+
+        {#if selected.type === 'ATR'}
+          <div class="space-y-2">
+            <Label for="atrPeriod">Period</Label>
+            <Input id="atrPeriod" type="number" min="1" value={String(selected.params.period ?? 14)}
+              oninput={(e) => updateNodeParam(selected.id, 'period', Number((e.currentTarget as HTMLInputElement).value))} />
+            <p class="text-xs text-muted-foreground">Average True Range — measures volatility. Useful for dynamic stop sizing.</p>
+          </div>
+        {/if}
+
+        {#if selected.type === 'Stochastic'}
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label for="stochK">%K Period</Label>
+              <Input id="stochK" type="number" min="1" value={String(selected.params.k ?? 14)}
+                oninput={(e) => updateNodeParam(selected.id, 'k', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+            <div class="space-y-2">
+              <Label for="stochD">%D Period</Label>
+              <Input id="stochD" type="number" min="1" value={String(selected.params.d ?? 3)}
+                oninput={(e) => updateNodeParam(selected.id, 'd', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">Outputs: %K (fast), %D (slow signal). Range 0–100.</p>
         {/if}
 
         {#if selected.type === 'Buy'}

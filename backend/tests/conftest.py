@@ -99,3 +99,10 @@ def auth_token(verified_user: User) -> str:
 @pytest.fixture()
 def auth_headers(auth_token: str) -> dict:
   return {"Authorization": f"Bearer {auth_token}"}
+
+
+@pytest.fixture()
+def auth_client(client, auth_headers):
+  """TestClient pre-loaded with a valid Authorization header."""
+  client.headers.update(auth_headers)
+  return client

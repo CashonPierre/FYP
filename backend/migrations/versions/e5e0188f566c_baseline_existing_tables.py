@@ -19,37 +19,39 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create users table (existed before migrations were introduced)
-    op.create_table(
-        'users',
-        sa.Column('id', sa.Uuid(), nullable=False),
-        sa.Column('username', sa.String(length=255), nullable=False),
-        sa.Column('email', sa.String(length=255), nullable=False),
-        sa.Column('hashed_password', sa.String(length=255), nullable=False),
-        sa.Column('is_verified', sa.Boolean(), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-    )
-    op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
-    op.create_index(op.f('ix_users_username'), 'users', ['username'], unique=True)
+    conn = op.get_bind()
 
-    # Create ohlc_bars hypertable (existed before migrations were introduced)
-    # TimescaleDB requires create_hypertable to be called after table creation,
-    # but that requires the timescaledb extension. We use plain SQL here.
-    op.create_table(
-        'ohlc_bars',
-        sa.Column('symbol', sa.Text(), nullable=False),
-        sa.Column('timeframe', sa.Text(), nullable=False, server_default='1D'),
-        sa.Column('time', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('open', sa.Float(), nullable=False),
-        sa.Column('high', sa.Float(), nullable=False),
-        sa.Column('low', sa.Float(), nullable=False),
-        sa.Column('close', sa.Float(), nullable=False),
-        sa.Column('volume', sa.BigInteger(), nullable=True),
-        sa.PrimaryKeyConstraint('symbol', 'timeframe', 'time'),
-    )
-    op.execute("SELECT create_hypertable('ohlc_bars', 'time', if_not_exists => TRUE)")
-    op.execute("CREATE INDEX ohlc_bars_time_idx ON ohlc_bars (time DESC)")
-    op.execute("CREATE INDEX idx_ohlc_bars_symbol_time_desc ON ohlc_bars (symbol, timeframe, time DESC)")
+    # users table
+    conn.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS users (
+            id UUID NOT NULL,
+            username VARCHAR(255) NOT NULL,
+            email VARCHAR(255) NOT NULL,
+            hashed_password VARCHAR(255) NOT NULL,
+            is_verified BOOLEAN NOT NULL,
+            PRIMARY KEY (id)
+        )
+    """))
+    conn.execute(sa.text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
+    conn.execute(sa.text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
+
+    # ohlc_bars hypertable
+    conn.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS ohlc_bars (
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL DEFAULT '1D',
+            time TIMESTAMPTZ NOT NULL,
+            open FLOAT NOT NULL,
+            high FLOAT NOT NULL,
+            low FLOAT NOT NULL,
+            close FLOAT NOT NULL,
+            volume BIGINT,
+            PRIMARY KEY (symbol, timeframe, time)
+        )
+    """))
+    conn.execute(sa.text("SELECT create_hypertable('ohlc_bars', 'time', if_not_exists => TRUE)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS ohlc_bars_time_idx ON ohlc_bars (time DESC)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ohlc_bars_symbol_time_desc ON ohlc_bars (symbol, timeframe, time DESC)"))
 
 
 def downgrade() -> None:
