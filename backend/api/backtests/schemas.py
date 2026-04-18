@@ -18,6 +18,9 @@ class BacktestSettings(BaseModel):
   initial_capital: float = 10000.0
   fees_bps: float = 0.0
   slippage_bps: float = 0.0
+  # "single"   → one symbol per run (single or multi-symbol fan-out)
+  # "universe" → one run ranks a universe cross-sectionally (factor strategy)
+  execution_mode: str = "single"
 
 
 class GraphNode(BaseModel):

@@ -31,7 +31,13 @@
     | 'IfCrossBelow'
     | 'Constant'
     | 'Buy'
-    | 'Sell';
+    | 'Sell'
+    // Universe-mode factor nodes
+    | 'Momentum'
+    | 'Reversal'
+    | 'LowVol'
+    | 'Liquidity'
+    | 'Rank';
 
   type BuilderNode = {
     id: string;
@@ -50,7 +56,7 @@
     targetHandle?: string;
   };
 
-  type PortType = 'event' | 'number';
+  type PortType = 'event' | 'number' | 'score';
 
   type NodePort = {
     handle: string;
@@ -92,6 +98,15 @@
     { type: 'Sell', title: 'Sell', hint: 'Exit position' },
   ];
 
+  // Universe-mode palette (factor strategy: cross-sectional rank of a universe)
+  const universePalette: Array<{ type: NodeType; title: string; hint: string }> = [
+    { type: 'Momentum',  title: 'Momentum',  hint: 'Trailing return (lookback − skip)' },
+    { type: 'Reversal',  title: 'Reversal',  hint: 'Inverse short-term return (buy losers)' },
+    { type: 'LowVol',    title: 'Low Vol',   hint: 'Negated realized volatility' },
+    { type: 'Liquidity', title: 'Liquidity', hint: 'Average dollar volume' },
+    { type: 'Rank',      title: 'Rank',      hint: 'Long top decile / short bottom decile' },
+  ];
+
   let nodes = $state<BuilderNode[]>([]);
   let edges = $state<BuilderEdge[]>([]);
   let selectedId = $state<string | null>(null);
@@ -118,7 +133,7 @@
 
   // Multi-symbol mode
   type UniverseMeta = { key: string; name: string; description: string; count: number; symbols: string[] };
-  let assetMode = $state<'single' | 'multi'>('single');
+  let assetMode = $state<'single' | 'multi' | 'universe'>('single');
   let multiSymbolsText = $state('');        // comma-separated free text
   let selectedUniverse = $state<string>('');
   let universes = $state<UniverseMeta[]>([]);
@@ -257,6 +272,20 @@
           inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
           outputs: [],
         };
+      case 'Momentum':
+      case 'Reversal':
+      case 'LowVol':
+      case 'Liquidity':
+        // Factor nodes — compute a cross-sectional score from OHLCV, no wirable input
+        return {
+          inputs: [],
+          outputs: [{ handle: 'out', label: 'score', type: 'score', y: NODE_DEFAULT_PORT_Y }],
+        };
+      case 'Rank':
+        return {
+          inputs: [{ handle: 'in', label: 'score', type: 'score', y: NODE_DEFAULT_PORT_Y }],
+          outputs: [],
+        };
       case 'Data':
       default:
         return { inputs: [], outputs: [] };
@@ -321,6 +350,16 @@
         return { period: 14 };
       case 'CCI':
         return { period: 20 };
+      case 'Momentum':
+        return { lookback: 252, skip: 21 };
+      case 'Reversal':
+        return { period: 21 };
+      case 'LowVol':
+        return { period: 63 };
+      case 'Liquidity':
+        return { period: 60 };
+      case 'Rank':
+        return { top_pct: 0.2, bottom_pct: 0.2, rebalance_days: 21, mode: 'long_only' };
       case 'Buy':
         return { amount: 10 };
       case 'Constant':
@@ -482,10 +521,74 @@
     edgeId?: string;
   };
 
+  const FACTOR_TYPES: readonly NodeType[] = ['Momentum', 'Reversal', 'LowVol', 'Liquidity'];
+
+  const validateUniverse = (
+    currentNodes: BuilderNode[],
+    currentEdges: BuilderEdge[]
+  ): ValidationIssue[] => {
+    const issues: ValidationIssue[] = [];
+    const factors = currentNodes.filter((n) => (FACTOR_TYPES as string[]).includes(n.type));
+    const ranks = currentNodes.filter((n) => n.type === 'Rank');
+    const stragglers = currentNodes.filter(
+      (n) => !(FACTOR_TYPES as string[]).includes(n.type) && n.type !== 'Rank'
+    );
+
+    for (const n of stragglers) {
+      issues.push({
+        level: 'error',
+        nodeId: n.id,
+        message: `Universe mode only supports factor + Rank blocks (remove ${n.type}).`,
+      });
+    }
+
+    if (factors.length === 0) {
+      issues.push({ level: 'error', message: 'Add a factor block (Momentum, Reversal, Low Vol, or Liquidity).' });
+    } else if (factors.length > 1) {
+      issues.push({ level: 'error', message: 'Universe mode supports only one factor block.' });
+    }
+    if (ranks.length === 0) {
+      issues.push({ level: 'error', message: 'Add a Rank block to convert scores into long/short weights.' });
+    } else if (ranks.length > 1) {
+      issues.push({ level: 'error', message: 'Universe mode supports only one Rank block.' });
+    }
+
+    if (factors.length === 1 && ranks.length === 1) {
+      const wired = currentEdges.some(
+        (e) => e.source === factors[0].id && e.target === ranks[0].id
+      );
+      if (!wired) {
+        issues.push({
+          level: 'error',
+          message: 'Wire the factor block\'s score output to the Rank block\'s input.',
+        });
+      }
+    }
+
+    // Rank param sanity
+    for (const r of ranks) {
+      const top = Number(r.params.top_pct ?? 0.2);
+      const bot = Number(r.params.bottom_pct ?? 0.2);
+      if (!(top > 0 && top <= 1)) {
+        issues.push({ level: 'error', nodeId: r.id, message: 'Rank top_pct must be in (0, 1].' });
+      }
+      if (!(bot > 0 && bot <= 1)) {
+        issues.push({ level: 'error', nodeId: r.id, message: 'Rank bottom_pct must be in (0, 1].' });
+      }
+      if (Number(r.params.rebalance_days ?? 21) < 1) {
+        issues.push({ level: 'error', nodeId: r.id, message: 'Rank rebalance_days must be at least 1.' });
+      }
+    }
+
+    return issues;
+  };
+
   const validate = (
     currentNodes: BuilderNode[],
     currentEdges: BuilderEdge[]
   ): ValidationIssue[] => {
+    if (assetMode === 'universe') return validateUniverse(currentNodes, currentEdges);
+
     const issues: ValidationIssue[] = [];
     const map = new Map(currentNodes.map((n) => [n.id, n] as const));
 
@@ -1141,7 +1244,7 @@
 
     let symbolsList: string[] | undefined;
     let universeKey: string | undefined;
-    if (assetMode === 'multi') {
+    if (assetMode === 'multi' || assetMode === 'universe') {
       if (selectedUniverse) {
         universeKey = selectedUniverse;
       } else {
@@ -1151,6 +1254,13 @@
           .filter(Boolean);
         if (symbolsList.length === 0) {
           toast.error('Enter symbols or pick a universe');
+          return null;
+        }
+      }
+      if (assetMode === 'universe') {
+        const total = (universeKey ? (universes.find((u) => u.key === universeKey)?.count ?? 0) : symbolsList?.length ?? 0);
+        if (total < 2) {
+          toast.error('Universe mode needs at least 2 symbols');
           return null;
         }
       }
@@ -1177,6 +1287,7 @@
         initial_capital: exportPayload.settings.initialCapital ?? 10000,
         fees_bps: exportPayload.settings.feesBps ?? 0,
         slippage_bps: exportPayload.settings.slippageBps ?? 0,
+        execution_mode: assetMode === 'universe' ? 'universe' : 'single',
       },
       graph: {
         nodes: nodesOut,
@@ -1388,84 +1499,9 @@
     <p class="text-sm text-muted-foreground">
       Drag blocks onto the canvas, wire an event flow, then run a backtest.
     </p>
-    <div class="mt-3 flex items-center gap-2 text-sm">
-      <span class="text-muted-foreground">Mode:</span>
-      <button
-        type="button"
-        class="rounded-md border px-3 py-1 transition-colors {assetMode === 'single' ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}"
-        onclick={() => { assetMode = 'single'; }}
-      >
-        Single Symbol
-      </button>
-      <button
-        type="button"
-        class="rounded-md border px-3 py-1 transition-colors {assetMode === 'multi' ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}"
-        onclick={() => { assetMode = 'multi'; }}
-      >
-        Multi-Symbol
-      </button>
-    </div>
-    <div class="mt-3 grid gap-3 sm:grid-cols-3">
-      {#if assetMode === 'single'}
-        <div class="space-y-1">
-          <Label for="targetSymbol">Target Asset</Label>
-          <Input id="targetSymbol" bind:value={targetSymbol} placeholder="AAPL" />
-        </div>
-      {:else}
-        <div class="space-y-1 sm:col-span-1">
-          <Label for="universeSelect">Universe</Label>
-          <select
-            id="universeSelect"
-            class="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            bind:value={selectedUniverse}
-          >
-            <option value="">— Custom list —</option>
-            {#each universes as u (u.key)}
-              <option value={u.key}>{u.name} ({u.count})</option>
-            {/each}
-          </select>
-        </div>
-        <div class="space-y-1 sm:col-span-2">
-          <Label for="multiSymbols">Symbols</Label>
-          <Input
-            id="multiSymbols"
-            bind:value={multiSymbolsText}
-            placeholder="AAPL, MSFT, NVDA"
-            disabled={!!selectedUniverse}
-          />
-        </div>
-      {/if}
-      <div class="space-y-1">
-        <Label for="periodStart">Start Date</Label>
-        <Input id="periodStart" type="date" bind:value={periodStart} />
-      </div>
-      <div class="space-y-1">
-        <Label for="periodEnd">End Date</Label>
-        <Input id="periodEnd" type="date" bind:value={periodEnd} />
-      </div>
-    </div>
-    <div class="text-xs text-muted-foreground">
-      Leave start/end blank to use the full available period.
-      <button
-        type="button"
-        class="ml-2 text-primary hover:underline"
-        onclick={() => {
-          periodStart = '';
-          periodEnd = '';
-        }}
-      >
-        Clear dates
-      </button>
-    </div>
-    {#if maxWarmupBars > 0}
-      <div class="mt-1 text-xs text-amber-600 dark:text-amber-400">
-        Warm-up: this strategy needs at least {maxWarmupBars} bars before producing signals.
-        Make sure your date range is long enough.
-      </div>
-    {/if}
   </div>
 
-  <div class="flex items-center gap-2">
+  <div class="flex flex-wrap items-center justify-end gap-2">
     <Button variant="outline" onclick={openTemplates}>Templates</Button>
     <Button variant="outline" onclick={saveDraft} disabled={nodes.length === 0}>
       Save Draft
@@ -1487,6 +1523,92 @@
     </Button>
     <Button onclick={runBacktest} disabled={nodes.length === 0 || hasErrors}>Run</Button>
   </div>
+</div>
+
+<div class="mt-4 rounded-md border bg-muted/20 p-4">
+  <div class="flex flex-wrap items-center gap-2 text-sm">
+    <span class="text-muted-foreground">Mode:</span>
+    <button
+      type="button"
+      class="rounded-md border px-3 py-1 transition-colors {assetMode === 'single' ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}"
+      onclick={() => { assetMode = 'single'; }}
+    >
+      Single Symbol
+    </button>
+    <button
+      type="button"
+      class="rounded-md border px-3 py-1 transition-colors {assetMode === 'multi' ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}"
+      onclick={() => { assetMode = 'multi'; }}
+    >
+      Multi-Symbol
+    </button>
+    <button
+      type="button"
+      class="rounded-md border px-3 py-1 transition-colors {assetMode === 'universe' ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}"
+      onclick={() => { assetMode = 'universe'; }}
+      title="Cross-sectional factor strategy — rank a universe and long top / short bottom"
+    >
+      Universe (Factor)
+    </button>
+  </div>
+  <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    {#if assetMode === 'single'}
+      <div class="space-y-1 lg:col-span-2">
+        <Label for="targetSymbol">Target Asset</Label>
+        <Input id="targetSymbol" bind:value={targetSymbol} placeholder="AAPL" />
+      </div>
+    {:else}
+      <div class="space-y-1">
+        <Label for="universeSelect">Universe</Label>
+        <select
+          id="universeSelect"
+          class="h-9 w-full rounded-md border bg-background px-3 py-1 text-sm"
+          bind:value={selectedUniverse}
+        >
+          <option value="">— Custom list —</option>
+          {#each universes as u (u.key)}
+            <option value={u.key}>{u.name} ({u.count})</option>
+          {/each}
+        </select>
+      </div>
+      <div class="space-y-1">
+        <Label for="multiSymbols">Symbols</Label>
+        <Input
+          id="multiSymbols"
+          bind:value={multiSymbolsText}
+          placeholder="AAPL, MSFT, NVDA"
+          disabled={!!selectedUniverse}
+        />
+      </div>
+    {/if}
+    <div class="space-y-1">
+      <Label for="periodStart">Start Date</Label>
+      <Input id="periodStart" type="date" bind:value={periodStart} />
+    </div>
+    <div class="space-y-1">
+      <Label for="periodEnd">End Date</Label>
+      <Input id="periodEnd" type="date" bind:value={periodEnd} />
+    </div>
+  </div>
+  <div class="mt-2 text-xs text-muted-foreground">
+    Leave start/end blank to use the full available period.
+    <button
+      type="button"
+      class="ml-2 text-primary hover:underline"
+      onclick={() => {
+        periodStart = '';
+        periodEnd = '';
+      }}
+    >
+      Clear dates
+    </button>
+  </div>
+  {#if maxWarmupBars > 0}
+    <div class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+      Warm-up: this strategy needs at least {maxWarmupBars} bars before producing signals.
+      Make sure your date range is long enough.
+    </div>
+  {/if}
 </div>
 
 {#if showSweep}
@@ -1807,24 +1929,26 @@
       <h2 class="font-semibold">Blocks</h2>
       <p class="text-xs text-muted-foreground">Drag to canvas (or click).</p>
     </div>
-    <div class="border-b p-3 space-y-2">
-      <Button
-        class="w-full"
-        variant="outline"
-        onclick={loadTemplateDCA}
-      >
-        Template: DCA
-      </Button>
-      <Button
-        class="w-full"
-        variant="outline"
-        onclick={loadTemplateSmaCrossover}
-      >
-        Template: SMA10 &gt; SMA50
-      </Button>
-    </div>
+    {#if assetMode !== 'universe'}
+      <div class="border-b p-3 space-y-2">
+        <Button
+          class="w-full"
+          variant="outline"
+          onclick={loadTemplateDCA}
+        >
+          Template: DCA
+        </Button>
+        <Button
+          class="w-full"
+          variant="outline"
+          onclick={loadTemplateSmaCrossover}
+        >
+          Template: SMA10 &gt; SMA50
+        </Button>
+      </div>
+    {/if}
     <div class="p-3 space-y-2">
-      {#each palette as item (item.type)}
+      {#each (assetMode === 'universe' ? universePalette : palette) as item (item.type)}
         <button
           class="w-full rounded-md border bg-background px-3 py-2 text-left hover:bg-accent transition-colors"
           onclick={() => addNode(item.type)}
@@ -2288,6 +2412,79 @@
               }}
             />
           </div>
+        {/if}
+
+        {#if selected.type === 'Momentum'}
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label for="momLookback">Lookback (bars)</Label>
+              <Input id="momLookback" type="number" min="2" value={String(selected.params.lookback ?? 252)}
+                oninput={(e) => updateNodeParam(selected.id, 'lookback', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+            <div class="space-y-2">
+              <Label for="momSkip">Skip (bars)</Label>
+              <Input id="momSkip" type="number" min="0" value={String(selected.params.skip ?? 21)}
+                oninput={(e) => updateNodeParam(selected.id, 'skip', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Score = close[t−skip] / close[t−lookback] − 1. Classic academic momentum excludes the
+            most recent month (skip=21) to avoid short-term reversal.
+          </p>
+        {/if}
+
+        {#if selected.type === 'Reversal' || selected.type === 'LowVol' || selected.type === 'Liquidity'}
+          {@const defaultPeriod = selected.type === 'Reversal' ? 21 : selected.type === 'LowVol' ? 63 : 60}
+          <div class="space-y-2">
+            <Label for="factorPeriod">Period (bars)</Label>
+            <Input id="factorPeriod" type="number" min="2" value={String(selected.params.period ?? defaultPeriod)}
+              oninput={(e) => updateNodeParam(selected.id, 'period', Number((e.currentTarget as HTMLInputElement).value))} />
+          </div>
+          <p class="text-xs text-muted-foreground">
+            {selected.type === 'Reversal'
+              ? 'Score = −(close[t] / close[t−period] − 1). Buy losers, short winners.'
+              : selected.type === 'LowVol'
+                ? 'Score = −stdev of daily returns over period. Lower volatility ranks higher.'
+                : 'Score = mean(close × volume) over period. More liquid names rank higher.'}
+          </p>
+        {/if}
+
+        {#if selected.type === 'Rank'}
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label for="rankTopPct">Top %</Label>
+              <Input id="rankTopPct" type="number" min="0.01" max="1" step="0.05"
+                value={String(selected.params.top_pct ?? 0.2)}
+                oninput={(e) => updateNodeParam(selected.id, 'top_pct', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+            <div class="space-y-2">
+              <Label for="rankBotPct">Bottom %</Label>
+              <Input id="rankBotPct" type="number" min="0.01" max="1" step="0.05"
+                value={String(selected.params.bottom_pct ?? 0.2)}
+                oninput={(e) => updateNodeParam(selected.id, 'bottom_pct', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+            <div class="space-y-2">
+              <Label for="rankRebal">Rebalance (bars)</Label>
+              <Input id="rankRebal" type="number" min="1"
+                value={String(selected.params.rebalance_days ?? 21)}
+                oninput={(e) => updateNodeParam(selected.id, 'rebalance_days', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+            <div class="space-y-2">
+              <Label for="rankMode">Mode</Label>
+              <select id="rankMode"
+                class="h-9 w-full rounded-md border bg-background px-3 py-1 text-sm"
+                value={String(selected.params.mode ?? 'long_only')}
+                onchange={(e) => updateNodeParam(selected.id, 'mode', (e.currentTarget as HTMLSelectElement).value)}
+              >
+                <option value="long_only">Long only</option>
+                <option value="long_short">Long / Short (dollar-neutral)</option>
+              </select>
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Long-only buys the top decile; long/short adds an equal-dollar short in the bottom decile.
+            Rebalance every N bars.
+          </p>
         {/if}
 
         <div class="rounded-md border bg-muted/30 p-3">

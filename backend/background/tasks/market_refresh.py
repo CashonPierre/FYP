@@ -126,12 +126,18 @@ def fetch_and_upsert(
         dialect = session.connection().dialect.name
 
         for ts, row in df.iterrows():
-            # yfinance returns tz-aware timestamps; normalise to UTC midnight for daily
             bar_time = ts.to_pydatetime()
             if bar_time.tzinfo is None:
                 bar_time = bar_time.replace(tzinfo=timezone.utc)
             else:
                 bar_time = bar_time.astimezone(timezone.utc)
+            # For D/W/M bars, snap to midnight UTC so the (symbol, timeframe, time)
+            # PK actually dedupes across DST boundaries. Without this, yfinance
+            # returns market-open in America/New_York which becomes 04:00 UTC in
+            # summer and 05:00 UTC in winter — two "different" keys for the
+            # same calendar day.
+            if timeframe in ("1D", "1W", "1M"):
+                bar_time = bar_time.replace(hour=0, minute=0, second=0, microsecond=0)
 
             bar_data = dict(
                 symbol=symbol,

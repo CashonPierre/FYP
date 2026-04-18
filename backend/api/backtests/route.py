@@ -29,7 +29,7 @@ from .schemas import (
   BatchRunSummary,
   BatchAggregate,
 )
-from background.tasks import run_backtest_batch_task
+from background.tasks import run_backtest_batch_task, run_universe_backtest_task
 from .repositories import (
   create_batch,
   create_backtest_run,
@@ -71,7 +71,43 @@ def submit_backtest(
   else:
     symbols = [payload.settings.symbol]  # type: ignore[list-item]
 
-  # --- Create batch + one run per symbol ---
+  execution_mode = payload.settings.execution_mode
+
+  # --- Universe mode: ONE cross-sectional run over the whole symbol list ---
+  if execution_mode == "universe":
+    if len(symbols) < 2:
+      from fastapi import HTTPException
+      raise HTTPException(
+        status_code=400,
+        detail="Universe mode requires at least 2 symbols",
+      )
+
+    base_settings = payload.model_dump()
+    # Keep the full symbol list inside run.settings so the executor can read it
+    base_settings["settings"]["symbols"] = symbols
+    batch = create_batch(
+      session=session,
+      user_id=user.id,
+      symbols=symbols,
+      settings_json=base_settings,
+    )
+    run = create_backtest_run(
+      session=session,
+      user_id=user.id,
+      settings_json=base_settings,
+      batch_id=batch.id,
+    )
+    session.commit()
+    run_universe_backtest_task.delay(str(run.id))
+
+    return BacktestSubmitted(
+      id=run.id,
+      status="queued",
+      batch_id=batch.id,
+      run_ids=[run.id],
+    )
+
+  # --- Single / multi-symbol: one run per symbol (existing fan-out path) ---
   base_settings = payload.model_dump()
   batch = create_batch(
     session=session,
