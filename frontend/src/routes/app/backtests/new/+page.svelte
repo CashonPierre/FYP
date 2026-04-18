@@ -109,6 +109,13 @@
   let targetSymbol = $state('AAPL');
   let periodStart = $state('2013-01-01'); // YYYY-MM-DD — dense S&P 500 data starts here
   let periodEnd = $state('2018-12-31');   // YYYY-MM-DD — dense data ends here; clear for full range
+
+  // Multi-symbol mode
+  type UniverseMeta = { key: string; name: string; description: string; count: number; symbols: string[] };
+  let assetMode = $state<'single' | 'multi'>('single');
+  let multiSymbolsText = $state('');        // comma-separated free text
+  let selectedUniverse = $state<string>('');
+  let universes = $state<UniverseMeta[]>([]);
   const importPlaceholder =
     '{\n' +
     '  "version": 0,\n' +
@@ -987,6 +994,14 @@
   };
 
   onMount(() => {
+    // Load available universes (public endpoint — no auth needed)
+    fetch(`${BACKEND}/market/universes`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { universes: UniverseMeta[] } | null) => {
+        if (data?.universes) universes = data.universes;
+      })
+      .catch(() => { /* offline/backend down — multi-symbol still usable via free text */ });
+
     const strategyId = new URLSearchParams(window.location.search).get('strategyId');
     if (strategyId) {
       loadStrategy(strategyId);
@@ -1109,11 +1124,29 @@
 
     const exportPayload = buildExportPayload();
 
+    // Resolve multi-symbol source if enabled
+    let symbolsList: string[] | undefined;
+    let universeKey: string | undefined;
+    if (assetMode === 'multi') {
+      if (selectedUniverse) {
+        universeKey = selectedUniverse;
+      } else {
+        symbolsList = multiSymbolsText
+          .split(/[,\s]+/)
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean);
+        if (symbolsList.length === 0) {
+          toast.error('Enter symbols or pick a universe');
+          return;
+        }
+      }
+    }
+
     // Transform camelCase frontend format → snake_case backend format
-    const body = {
+    const body: Record<string, unknown> = {
       version: exportPayload.version,
       settings: {
-        symbol: exportPayload.settings.symbol ?? 'AAPL',
+        symbol: assetMode === 'single' ? (exportPayload.settings.symbol ?? 'AAPL') : null,
         timeframe: exportPayload.settings.timeframe ?? '1D',
         start_date: exportPayload.settings.startDate ?? null,
         end_date: exportPayload.settings.endDate ?? null,
@@ -1137,6 +1170,8 @@
         })),
       },
     };
+    if (symbolsList) body.symbols = symbolsList;
+    if (universeKey) body.universe = universeKey;
 
     let resp: Response;
     try {
@@ -1164,9 +1199,15 @@
       return;
     }
 
-    const data = (await resp.json()) as { id: string; status: string };
+    const data = (await resp.json()) as {
+      id: string;
+      status: string;
+      batch_id?: string | null;
+      run_ids?: string[];
+    };
     toast.success('Backtest queued');
-    goto(`/app/backtests/${data.id}`);
+    const isBatch = (data.run_ids?.length ?? 0) > 0 && !!data.batch_id;
+    goto(isBatch ? `/app/backtests/batch/${data.batch_id}` : `/app/backtests/${data.id}`);
   };
 </script>
 
@@ -1178,11 +1219,53 @@
     <p class="text-sm text-muted-foreground">
       Drag blocks onto the canvas, wire an event flow, then run a backtest.
     </p>
+    <div class="mt-3 flex items-center gap-2 text-sm">
+      <span class="text-muted-foreground">Mode:</span>
+      <button
+        type="button"
+        class="rounded-md border px-3 py-1 transition-colors {assetMode === 'single' ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}"
+        onclick={() => { assetMode = 'single'; }}
+      >
+        Single Symbol
+      </button>
+      <button
+        type="button"
+        class="rounded-md border px-3 py-1 transition-colors {assetMode === 'multi' ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}"
+        onclick={() => { assetMode = 'multi'; }}
+      >
+        Multi-Symbol
+      </button>
+    </div>
     <div class="mt-3 grid gap-3 sm:grid-cols-3">
-      <div class="space-y-1">
-        <Label for="targetSymbol">Target Asset</Label>
-        <Input id="targetSymbol" bind:value={targetSymbol} placeholder="AAPL" />
-      </div>
+      {#if assetMode === 'single'}
+        <div class="space-y-1">
+          <Label for="targetSymbol">Target Asset</Label>
+          <Input id="targetSymbol" bind:value={targetSymbol} placeholder="AAPL" />
+        </div>
+      {:else}
+        <div class="space-y-1 sm:col-span-1">
+          <Label for="universeSelect">Universe</Label>
+          <select
+            id="universeSelect"
+            class="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            bind:value={selectedUniverse}
+          >
+            <option value="">— Custom list —</option>
+            {#each universes as u (u.key)}
+              <option value={u.key}>{u.name} ({u.count})</option>
+            {/each}
+          </select>
+        </div>
+        <div class="space-y-1 sm:col-span-2">
+          <Label for="multiSymbols">Symbols</Label>
+          <Input
+            id="multiSymbols"
+            bind:value={multiSymbolsText}
+            placeholder="AAPL, MSFT, NVDA"
+            disabled={!!selectedUniverse}
+          />
+        </div>
+      {/if}
       <div class="space-y-1">
         <Label for="periodStart">Start Date</Label>
         <Input id="periodStart" type="date" bind:value={periodStart} />
