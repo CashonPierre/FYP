@@ -12,6 +12,7 @@
     { label: 'New Backtest', href: '/app/backtests/new' },
     { label: 'Backtest History', href: '/app/backtests' },
     { label: 'Strategies', href: '/app/strategies' },
+    { label: 'My Data', href: '/app/datasets' },
     { label: 'Settings', href: '/app/settings' },
   ];
 

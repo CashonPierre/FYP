@@ -6,3 +6,4 @@ from .backtest_runs import BacktestRun as BacktestRun
 from .run_metrics import RunMetrics as RunMetrics
 from .trades import Trade as Trade
 from .equity_points import EquityPoint as EquityPoint
+from .user_datasets import UserDataset as UserDataset, UserOhlcBar as UserOhlcBar

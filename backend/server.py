@@ -4,14 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 # Custom
-from database.make_db import Base, engine
 from configs import settings, setup_logging
 from middlewares import LoggingMiddleware
 from api.auth import auth_router
 from api.market import market_router
 from api.backtests import backtest_router
 from api.strategies import strategy_router
-from api.user import user_router
+from api.user import user_router, dataset_router
 from app_common.exception_handlers import app_error_handler
 from app_common.exceptions import AppError
 
@@ -44,6 +43,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(router=backtest_router)
     app.include_router(router=strategy_router)
     app.include_router(router=user_router)
+    app.include_router(router=dataset_router)
 
 
 def register_exception_handler(app: FastAPI) -> None:
@@ -68,7 +68,8 @@ if __name__ == "__main__":
     """ starting the server here """
     setup_logging()
 
-    Base.metadata.create_all(bind=engine)
+    # Schema is owned by Alembic — run `alembic upgrade head` before starting
+    # the server. Tests still build tables via conftest's own create_all.
     app: FastAPI = create_app()
 
     import os

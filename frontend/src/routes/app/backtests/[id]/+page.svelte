@@ -30,6 +30,8 @@
   type ApiResults = {
     id: string;
     status: string;
+    symbol: string | null;
+    timeframe: string | null;
     summary: ApiSummary | null;
     series: {
       ohlc: { time: string; open: number; high: number; low: number; close: number; volume: number | null }[];
@@ -308,15 +310,21 @@
   const summary = $derived.by(() => {
     const api = apiResults?.summary ?? null;
 
-    const symbol =
-      (payload?.settings?.symbol && typeof payload.settings.symbol === 'string'
+    // Prefer the symbol/timeframe echoed by the results API — `payload` is only
+    // populated for mock runs. Falling back to AAPL/1D here meant every real
+    // run's "Buy & Hold …" label read AAPL regardless of the actual symbol.
+    const apiSymbol = apiResults?.symbol ?? null;
+    const apiTimeframe = apiResults?.timeframe ?? null;
+    const payloadSymbol =
+      payload?.settings?.symbol && typeof payload.settings.symbol === 'string'
         ? payload.settings.symbol
-        : 'AAPL'
-      ).toUpperCase();
-    const timeframe =
+        : null;
+    const payloadTimeframe =
       payload?.settings?.timeframe && typeof payload.settings.timeframe === 'string'
         ? payload.settings.timeframe
-        : '1D';
+        : null;
+    const symbol = (apiSymbol ?? payloadSymbol ?? '').toUpperCase() || '—';
+    const timeframe = apiTimeframe ?? payloadTimeframe ?? '1D';
     const startDate =
       payload?.settings?.startDate && typeof payload.settings.startDate === 'string'
         ? payload.settings.startDate

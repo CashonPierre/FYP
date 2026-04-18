@@ -21,6 +21,9 @@ class BacktestSettings(BaseModel):
   # "single"   → one symbol per run (single or multi-symbol fan-out)
   # "universe" → one run ranks a universe cross-sectionally (factor strategy)
   execution_mode: str = "single"
+  # BYOD: when set, backtest pulls bars from user_ohlc_bars for this dataset
+  # instead of the preset OhlcBar universe. Mutually exclusive with symbols/universe.
+  dataset_id: uuid.UUID | None = None
 
 
 class GraphNode(BaseModel):
@@ -55,8 +58,11 @@ class BacktestCreate(BaseModel):
   def require_symbol_source(self):
     has_single = bool(self.settings.symbol)
     has_multi = bool(self.symbols) or bool(self.universe)
-    if not has_single and not has_multi:
-      raise ValueError("Provide settings.symbol, symbols list, or universe key")
+    has_dataset = bool(self.settings.dataset_id)
+    if not has_single and not has_multi and not has_dataset:
+      raise ValueError("Provide settings.symbol, settings.dataset_id, symbols list, or universe key")
+    if has_dataset and (has_multi or has_single):
+      raise ValueError("dataset_id cannot be combined with symbol / symbols / universe")
     return self
 
 
@@ -125,6 +131,8 @@ class ResultSeries(BaseModel):
 class BacktestResults(BaseModel):
   id: uuid.UUID
   status: str
+  symbol: str | None = None          # so the UI can label charts without re-reading settings
+  timeframe: str | None = None
   summary: ResultSummary | None = None
   series: ResultSeries = ResultSeries()
 

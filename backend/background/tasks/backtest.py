@@ -14,12 +14,30 @@ from sqlalchemy import select, and_
 # Custom
 from background.celery_app import celery_worker
 from database.make_db import SessionLocal
-from database.models import BacktestRun, RunMetrics, Trade, OhlcBar, EquityPoint
+from database.models import BacktestRun, RunMetrics, Trade, OhlcBar, EquityPoint, UserDataset, UserOhlcBar
 from configs import get_logger
 
 ENGINE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'trading_engine')
 
 logger = get_logger()
+
+
+class _BarRow:
+  """Minimal duck-typed OHLC row used when loading UserOhlcBar rows.
+
+  Lets the downstream loop treat user-uploaded bars and preset OhlcBar rows
+  identically (same attribute access pattern).
+  """
+  __slots__ = ("symbol", "time", "open", "high", "low", "close", "volume")
+
+  def __init__(self, *, symbol, time, open, high, low, close, volume):
+    self.symbol = symbol
+    self.time = time
+    self.open = open
+    self.high = high
+    self.low = low
+    self.close = close
+    self.volume = volume
 
 
 def _strategy_from_graph(graph: dict, ohlcv_df=None):
@@ -130,27 +148,53 @@ def run_backtest(self: Task, run_id: str) -> None:
     start_date = run_settings.get("start_date")
     end_date = run_settings.get("end_date")
     initial_capital: float = float(run_settings.get("initial_capital", 10000.0))
-
-    if not symbol:
-      raise ValueError("No symbol provided in backtest settings")
+    dataset_id_raw = run_settings.get("dataset_id")
 
     # --- 3. Fetch OHLC data from DB ---
-    stmt = select(OhlcBar).where(
-      and_(
-        OhlcBar.symbol == symbol,
-        OhlcBar.timeframe == timeframe,
+    if dataset_id_raw:
+      # BYOD path: load bars from user_ohlc_bars for this dataset.
+      dataset = session.get(UserDataset, uuid.UUID(str(dataset_id_raw)))
+      if not dataset or dataset.user_id != run.user_id:
+        raise ValueError(f"Dataset {dataset_id_raw} not found or not owned by user")
+      symbol = dataset.symbol
+      timeframe = dataset.timeframe
+
+      stmt = select(UserOhlcBar).where(UserOhlcBar.dataset_id == dataset.id)
+      if start_date:
+        stmt = stmt.where(UserOhlcBar.time >= start_date)
+      if end_date:
+        stmt = stmt.where(UserOhlcBar.time <= end_date)
+      user_bars: list[UserOhlcBar] = list(
+        session.execute(stmt.order_by(UserOhlcBar.time)).scalars().all()
       )
-    )
-    if start_date:
-      stmt = stmt.where(OhlcBar.time >= start_date)
-    if end_date:
-      stmt = stmt.where(OhlcBar.time <= end_date)
-    stmt = stmt.order_by(OhlcBar.time)
+      if not user_bars:
+        raise ValueError(f"No bars found in dataset {dataset.name!r}")
+      # Normalise to a shape the downstream loop can consume uniformly.
+      bars = [
+        _BarRow(symbol=symbol, time=b.time, open=b.open, high=b.high,
+                low=b.low, close=b.close, volume=b.volume)
+        for b in user_bars
+      ]
+    else:
+      if not symbol:
+        raise ValueError("No symbol provided in backtest settings")
 
-    bars: list[OhlcBar] = list(session.execute(stmt).scalars().all())
+      stmt = select(OhlcBar).where(
+        and_(
+          OhlcBar.symbol == symbol,
+          OhlcBar.timeframe == timeframe,
+        )
+      )
+      if start_date:
+        stmt = stmt.where(OhlcBar.time >= start_date)
+      if end_date:
+        stmt = stmt.where(OhlcBar.time <= end_date)
+      stmt = stmt.order_by(OhlcBar.time)
 
-    if not bars:
-      raise ValueError(f"No market data found for {symbol} ({timeframe})")
+      bars = list(session.execute(stmt).scalars().all())
+
+      if not bars:
+        raise ValueError(f"No market data found for {symbol} ({timeframe})")
 
     # --- 4. Set up engine ---
     engine = _make_engine(initial_cash=initial_capital)

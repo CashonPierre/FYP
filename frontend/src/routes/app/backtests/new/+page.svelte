@@ -25,6 +25,18 @@
     | 'ROC'
     | 'WilliamsR'
     | 'CCI'
+    | 'KDJ'
+    | 'MFI'
+    | 'OBV'
+    | 'KST'
+    | 'And'
+    | 'Or'
+    | 'Not'
+    | 'TimeWindow'
+    | 'Position'
+    | 'StopLoss'
+    | 'TakeProfit'
+    | 'TrailingStop'
     | 'IfAbove'
     | 'IfBelow'
     | 'IfCrossAbove'
@@ -88,14 +100,26 @@
     { type: 'ROC', title: 'ROC', hint: 'Rate of Change (% over N bars)' },
     { type: 'WilliamsR', title: 'Williams %R', hint: 'Momentum oscillator (-100 to 0)' },
     { type: 'CCI', title: 'CCI', hint: 'Commodity Channel Index' },
+    { type: 'KDJ', title: 'KDJ', hint: 'Stochastic K/D/J (popular on Futu/Moomoo)' },
+    { type: 'MFI', title: 'MFI', hint: 'Money Flow Index (volume-weighted RSI)' },
+    { type: 'OBV', title: 'OBV', hint: 'On-Balance Volume (cumulative)' },
+    { type: 'KST', title: 'KST', hint: 'Know Sure Thing — long-term momentum' },
     // Conditions
     { type: 'IfAbove', title: 'If A > B', hint: 'True while A is above B' },
     { type: 'IfBelow', title: 'If A < B', hint: 'True while A is below B' },
     { type: 'IfCrossAbove', title: 'Cross Above', hint: 'Fires once when A crosses above B' },
     { type: 'IfCrossBelow', title: 'Cross Below', hint: 'Fires once when A crosses below B' },
+    { type: 'And', title: 'And', hint: 'True when both inputs fire' },
+    { type: 'Or',  title: 'Or',  hint: 'True when either input fires' },
+    { type: 'Not', title: 'Not', hint: 'Invert a condition' },
+    { type: 'TimeWindow', title: 'Time Window', hint: 'True while date is within [start, end]' },
+    { type: 'Position',   title: 'Position',    hint: 'Branch on flat vs. holding state' },
     // Actions
     { type: 'Buy', title: 'Buy', hint: 'Enter position' },
     { type: 'Sell', title: 'Sell', hint: 'Exit position' },
+    { type: 'StopLoss',     title: 'Stop Loss',     hint: 'Exit if price drops N% below entry' },
+    { type: 'TakeProfit',   title: 'Take Profit',   hint: 'Exit if price rises N% above entry' },
+    { type: 'TrailingStop', title: 'Trailing Stop', hint: 'Exit if price drops N% below high since entry' },
   ];
 
   // Universe-mode palette (factor strategy: cross-sectional rank of a universe)
@@ -133,7 +157,20 @@
 
   // Multi-symbol mode
   type UniverseMeta = { key: string; name: string; description: string; count: number; symbols: string[] };
-  let assetMode = $state<'single' | 'multi' | 'universe'>('single');
+  let assetMode = $state<'single' | 'multi' | 'universe' | 'dataset'>('single');
+
+  // BYOD — user-uploaded datasets
+  type UserDatasetSummary = {
+    id: string;
+    name: string;
+    symbol: string;
+    timeframe: string;
+    rows_count: number;
+    first_bar: string | null;
+    last_bar: string | null;
+  };
+  let userDatasets = $state<UserDatasetSummary[]>([]);
+  let selectedDatasetId = $state<string>('');
   let multiSymbolsText = $state('');        // comma-separated free text
   let selectedUniverse = $state<string>('');
   let universes = $state<UniverseMeta[]>([]);
@@ -210,7 +247,9 @@
       case 'ATR':
       case 'WilliamsR':
       case 'CCI':
-        // H/L/C-based indicators — consume OHLCV from the DataFrame, no wirable input
+      case 'MFI':
+      case 'OBV':
+        // H/L/C/V-based indicators — consume OHLCV from the DataFrame, no wirable input
         return {
           inputs: [],
           outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
@@ -246,6 +285,23 @@
             { handle: 'd', label: '%D', type: 'number', y: 52 },
           ],
         };
+      case 'KDJ':
+        return {
+          inputs: [],
+          outputs: [
+            { handle: 'k', label: 'K', type: 'number', y: 18 },
+            { handle: 'd', label: 'D', type: 'number', y: 38 },
+            { handle: 'j', label: 'J', type: 'number', y: 58 },
+          ],
+        };
+      case 'KST':
+        return {
+          inputs: [],
+          outputs: [
+            { handle: 'kst',    label: 'KST',    type: 'number', y: 24 },
+            { handle: 'signal', label: 'Signal', type: 'number', y: 52 },
+          ],
+        };
       case 'IfAbove':
       case 'IfBelow':
       case 'IfCrossAbove':
@@ -260,6 +316,50 @@
             { handle: 'true', label: 'true', type: 'event', y: 24 },
             { handle: 'false', label: 'false', type: 'event', y: 52 },
           ],
+        };
+      case 'And':
+      case 'Or':
+        return {
+          inputs: [
+            { handle: 'a', label: 'A', type: 'event', y: 18 },
+            { handle: 'b', label: 'B', type: 'event', y: 38 },
+          ],
+          outputs: [
+            { handle: 'true',  label: 'true',  type: 'event', y: 18 },
+            { handle: 'false', label: 'false', type: 'event', y: 38 },
+          ],
+        };
+      case 'Not':
+        return {
+          inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
+          outputs: [
+            { handle: 'true',  label: 'true',  type: 'event', y: 18 },
+            { handle: 'false', label: 'false', type: 'event', y: 38 },
+          ],
+        };
+      case 'TimeWindow':
+        return {
+          inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
+          outputs: [
+            { handle: 'true',  label: 'in',  type: 'event', y: 18 },
+            { handle: 'false', label: 'out', type: 'event', y: 38 },
+          ],
+        };
+      case 'Position':
+        return {
+          inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
+          outputs: [
+            { handle: 'flat',    label: 'flat',    type: 'event', y: 18 },
+            { handle: 'holding', label: 'holding', type: 'event', y: 38 },
+          ],
+        };
+      case 'StopLoss':
+      case 'TakeProfit':
+      case 'TrailingStop':
+        // Event in → no output (they emit exit signals internally)
+        return {
+          inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
+          outputs: [],
         };
       case 'Constant':
         return {
@@ -350,6 +450,28 @@
         return { period: 14 };
       case 'CCI':
         return { period: 20 };
+      case 'KDJ':
+        return { length: 9, signal: 3 };
+      case 'MFI':
+        return { period: 14 };
+      case 'OBV':
+        return {};
+      case 'KST':
+        return {};
+      case 'And':
+      case 'Or':
+      case 'Not':
+        return {};
+      case 'TimeWindow':
+        return { start: '2015-01-01', end: '2020-12-31' };
+      case 'Position':
+        return {};
+      case 'StopLoss':
+        return { pct: 2.0 };
+      case 'TakeProfit':
+        return { pct: 5.0 };
+      case 'TrailingStop':
+        return { pct: 3.0 };
       case 'Momentum':
         return { lookback: 252, skip: 21 };
       case 'Reversal':
@@ -662,19 +784,43 @@
         });
       }
 
-      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR', 'ROC', 'WilliamsR', 'CCI'].includes(node.type) && typeof node.params.period !== 'number') {
+      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR', 'ROC', 'WilliamsR', 'CCI', 'MFI'].includes(node.type) && typeof node.params.period !== 'number') {
         issues.push({
           level: 'error',
           nodeId: node.id,
           message: 'Period must be a number.',
         });
       }
-      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR', 'ROC', 'WilliamsR', 'CCI'].includes(node.type) && Number(node.params.period) <= 0) {
+      if (['SMA', 'EMA', 'RSI', 'BollingerBands', 'ATR', 'ROC', 'WilliamsR', 'CCI', 'MFI'].includes(node.type) && Number(node.params.period) <= 0) {
         issues.push({
           level: 'error',
           nodeId: node.id,
           message: 'Period must be greater than 0.',
         });
+      }
+      if (node.type === 'KDJ') {
+        if (!Number(node.params.length) || Number(node.params.length) <= 0) {
+          issues.push({ level: 'error', nodeId: node.id, message: 'KDJ length must be a positive number.' });
+        }
+        if (!Number(node.params.signal) || Number(node.params.signal) <= 0) {
+          issues.push({ level: 'error', nodeId: node.id, message: 'KDJ signal must be a positive number.' });
+        }
+      }
+      if (['StopLoss', 'TakeProfit', 'TrailingStop'].includes(node.type)) {
+        const pct = Number(node.params.pct);
+        if (!pct || pct <= 0) {
+          issues.push({ level: 'error', nodeId: node.id, message: `${node.type} percentage must be > 0.` });
+        }
+      }
+      if (node.type === 'TimeWindow') {
+        const start = String(node.params.start ?? '');
+        const end   = String(node.params.end ?? '');
+        const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRe.test(start) || !dateRe.test(end)) {
+          issues.push({ level: 'error', nodeId: node.id, message: 'TimeWindow start/end must be YYYY-MM-DD.' });
+        } else if (start > end) {
+          issues.push({ level: 'error', nodeId: node.id, message: 'TimeWindow start must be ≤ end.' });
+        }
       }
       if (node.type === 'MACD') {
         const fast = Number(node.params.fast), slow = Number(node.params.slow);
@@ -773,6 +919,9 @@
       else if (n.type === 'ROC') needed = (Number(n.params.period) || 0) + 1;
       else if (n.type === 'WilliamsR') needed = Number(n.params.period) || 0;
       else if (n.type === 'CCI') needed = Number(n.params.period) || 0;
+      else if (n.type === 'MFI') needed = Number(n.params.period) || 0;
+      else if (n.type === 'KDJ') needed = (Number(n.params.length) || 9) + (Number(n.params.signal) || 3);
+      else if (n.type === 'KST') needed = 30 + 9; // roc4=30 + signal=9 default warm-up
       return Math.max(max, needed);
     }, 0)
   );
@@ -1002,6 +1151,21 @@
       'ATR',
       'Volume',
       'Stochastic',
+      'ROC',
+      'WilliamsR',
+      'CCI',
+      'KDJ',
+      'MFI',
+      'OBV',
+      'KST',
+      'And',
+      'Or',
+      'Not',
+      'TimeWindow',
+      'Position',
+      'StopLoss',
+      'TakeProfit',
+      'TrailingStop',
       'IfAbove',
       'IfBelow',
       'IfCrossAbove',
@@ -1009,6 +1173,11 @@
       'Constant',
       'Buy',
       'Sell',
+      'Momentum',
+      'Reversal',
+      'LowVol',
+      'Liquidity',
+      'Rank',
     ];
     if (!allowedTypes.includes(type)) return null;
     return {
@@ -1123,7 +1292,27 @@
       })
       .catch(() => { /* offline/backend down — multi-symbol still usable via free text */ });
 
-    const strategyId = new URLSearchParams(window.location.search).get('strategyId');
+    // Fetch user's uploaded datasets (ignore failure — BYOD is optional).
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetch(`${BACKEND}/user/datasets`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => (r.ok ? r.json() : []))
+        .then((list: UserDatasetSummary[]) => {
+          userDatasets = list;
+        })
+        .catch(() => { /* offline — dataset picker stays empty */ });
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const datasetIdParam = params.get('datasetId');
+    if (datasetIdParam) {
+      assetMode = 'dataset';
+      selectedDatasetId = datasetIdParam;
+    }
+
+    const strategyId = params.get('strategyId');
     if (strategyId) {
       loadStrategy(strategyId);
       return;
@@ -1244,6 +1433,43 @@
 
     let symbolsList: string[] | undefined;
     let universeKey: string | undefined;
+
+    // BYOD short-circuit — dataset_id supersedes symbol/symbols/universe.
+    if (assetMode === 'dataset') {
+      if (!selectedDatasetId) {
+        toast.error('Pick an uploaded dataset');
+        return null;
+      }
+      const nodesOut = exportPayload.graph.nodes.map((n) => {
+        const data: Record<string, unknown> = { ...(n.params ?? {}) };
+        if (override && override.nodeId === n.id) data[override.paramKey] = override.value;
+        return { id: n.id, type: n.type, position: { x: n.x, y: n.y }, data };
+      });
+      const body: Record<string, unknown> = {
+        version: exportPayload.version,
+        settings: {
+          dataset_id: selectedDatasetId,
+          start_date: exportPayload.settings.startDate ?? null,
+          end_date: exportPayload.settings.endDate ?? null,
+          initial_capital: exportPayload.settings.initialCapital ?? 10000,
+          fees_bps: exportPayload.settings.feesBps ?? 0,
+          slippage_bps: exportPayload.settings.slippageBps ?? 0,
+          execution_mode: 'single',
+        },
+        graph: {
+          nodes: nodesOut,
+          edges: exportPayload.graph.edges.map((e) => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            source_handle: e.sourceHandle ?? null,
+            target_handle: e.targetHandle ?? null,
+          })),
+        },
+      };
+      return { body };
+    }
+
     if (assetMode === 'multi' || assetMode === 'universe') {
       if (selectedUniverse) {
         universeKey = selectedUniverse;
@@ -1550,12 +1776,43 @@
     >
       Universe (Factor)
     </button>
+    <button
+      type="button"
+      class="rounded-md border px-3 py-1 transition-colors {assetMode === 'dataset' ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}"
+      onclick={() => { assetMode = 'dataset'; }}
+      title="Backtest against a CSV you uploaded in My Data"
+    >
+      Uploaded Data
+    </button>
   </div>
   <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
     {#if assetMode === 'single'}
       <div class="space-y-1 lg:col-span-2">
         <Label for="targetSymbol">Target Asset</Label>
         <Input id="targetSymbol" bind:value={targetSymbol} placeholder="AAPL" />
+      </div>
+    {:else if assetMode === 'dataset'}
+      <div class="space-y-1 lg:col-span-2">
+        <Label for="datasetSelect">Uploaded Dataset</Label>
+        {#if userDatasets.length === 0}
+          <div class="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            No datasets yet —
+            <a href="/app/datasets" class="text-primary hover:underline">upload one in My Data</a>.
+          </div>
+        {:else}
+          <select
+            id="datasetSelect"
+            class="h-9 w-full rounded-md border bg-background px-3 py-1 text-sm"
+            bind:value={selectedDatasetId}
+          >
+            <option value="">— Select a dataset —</option>
+            {#each userDatasets as d (d.id)}
+              <option value={d.id}>
+                {d.name} ({d.symbol} · {d.timeframe} · {d.rows_count.toLocaleString()} bars)
+              </option>
+            {/each}
+          </select>
+        {/if}
       </div>
     {:else}
       <div class="space-y-1">
@@ -2395,6 +2652,100 @@
             </div>
           </div>
           <p class="text-xs text-muted-foreground">Outputs: %K (fast), %D (slow signal). Range 0–100.</p>
+        {/if}
+
+        {#if selected.type === 'KDJ'}
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label for="kdjLength">Length</Label>
+              <Input id="kdjLength" type="number" min="1" value={String(selected.params.length ?? 9)}
+                oninput={(e) => updateNodeParam(selected.id, 'length', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+            <div class="space-y-2">
+              <Label for="kdjSignal">Signal</Label>
+              <Input id="kdjSignal" type="number" min="1" value={String(selected.params.signal ?? 3)}
+                oninput={(e) => updateNodeParam(selected.id, 'signal', Number((e.currentTarget as HTMLInputElement).value))} />
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            K/D/J lines. Common rule: buy when J crosses above D below 20; sell when J crosses below D above 80.
+          </p>
+        {/if}
+
+        {#if selected.type === 'MFI'}
+          <div class="space-y-2">
+            <Label for="mfiPeriod">Period</Label>
+            <Input id="mfiPeriod" type="number" min="1" value={String(selected.params.period ?? 14)}
+              oninput={(e) => updateNodeParam(selected.id, 'period', Number((e.currentTarget as HTMLInputElement).value))} />
+            <p class="text-xs text-muted-foreground">
+              Money Flow Index — volume-weighted RSI, range 0–100. Oversold &lt; 20, overbought &gt; 80.
+            </p>
+          </div>
+        {/if}
+
+        {#if selected.type === 'OBV'}
+          <p class="text-xs text-muted-foreground">
+            On-Balance Volume — cumulative signed volume. Useful for trend confirmation (divergence vs. price).
+          </p>
+        {/if}
+
+        {#if selected.type === 'KST'}
+          <p class="text-xs text-muted-foreground">
+            Know Sure Thing — weighted sum of four ROCs (10/15/20/30). Signal = 9-period SMA of KST.
+            Trade the crossover of KST over its signal.
+          </p>
+        {/if}
+
+        {#if selected.type === 'And' || selected.type === 'Or'}
+          <p class="text-xs text-muted-foreground">
+            {selected.type === 'And'
+              ? 'Fires the "true" port only when both inputs A and B fire on the same bar.'
+              : 'Fires the "true" port when either input A or B fires on the bar.'}
+          </p>
+        {/if}
+
+        {#if selected.type === 'Not'}
+          <p class="text-xs text-muted-foreground">Inverts the incoming condition.</p>
+        {/if}
+
+        {#if selected.type === 'TimeWindow'}
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label for="twStart">Start</Label>
+              <Input id="twStart" type="date" value={String(selected.params.start ?? '')}
+                oninput={(e) => updateNodeParam(selected.id, 'start', (e.currentTarget as HTMLInputElement).value)} />
+            </div>
+            <div class="space-y-2">
+              <Label for="twEnd">End</Label>
+              <Input id="twEnd" type="date" value={String(selected.params.end ?? '')}
+                oninput={(e) => updateNodeParam(selected.id, 'end', (e.currentTarget as HTMLInputElement).value)} />
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            "true" fires while the bar date is within the window (inclusive); "false" fires outside.
+          </p>
+        {/if}
+
+        {#if selected.type === 'Position'}
+          <p class="text-xs text-muted-foreground">
+            Branch on strategy state. "flat" fires when no position is held; "holding" fires while in position.
+          </p>
+        {/if}
+
+        {#if selected.type === 'StopLoss' || selected.type === 'TakeProfit' || selected.type === 'TrailingStop'}
+          <div class="space-y-2">
+            <Label for="riskPct">Percentage</Label>
+            <Input id="riskPct" type="number" min="0.1" step="0.1"
+              value={String(selected.params.pct ?? (selected.type === 'StopLoss' ? 2 : selected.type === 'TakeProfit' ? 5 : 3))}
+              oninput={(e) => updateNodeParam(selected.id, 'pct', Number((e.currentTarget as HTMLInputElement).value))} />
+          </div>
+          <p class="text-xs text-muted-foreground">
+            {selected.type === 'StopLoss'
+              ? 'Closes the position if the close falls N% below the entry price.'
+              : selected.type === 'TakeProfit'
+                ? 'Closes the position if the close rises N% above the entry price.'
+                : 'Closes the position if the close falls N% below the highest close since entry.'}
+          </p>
         {/if}
 
         {#if selected.type === 'Buy'}

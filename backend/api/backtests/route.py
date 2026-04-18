@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 # Custom
 from database.make_db import get_session
-from database.models import BacktestRun, BacktestBatch, RunMetrics, Trade, OhlcBar, EquityPoint as EquityPointModel
+from database.models import BacktestRun, BacktestBatch, RunMetrics, Trade, OhlcBar, EquityPoint as EquityPointModel, UserDataset
 from api.auth.dependencies import get_current_user
 from api.auth.schemas import CurrentUser
 from api.auth.repositories import get_user_by_email
@@ -58,6 +58,29 @@ def submit_backtest(
   user = get_user_by_email(session=session, email=current_user.email)
   if not user:
     raise NotFoundError(message="User not found")
+
+  # --- BYOD path: one run against a user-uploaded dataset, no fan-out ---
+  if payload.settings.dataset_id:
+    dataset = session.get(UserDataset, payload.settings.dataset_id)
+    if not dataset or dataset.user_id != user.id:
+      raise NotFoundError(message="Dataset not found")
+    base_settings = payload.model_dump(mode="json")
+    # Pin the concrete symbol so list/results endpoints can label the run.
+    base_settings["settings"]["symbol"] = dataset.symbol
+    base_settings["settings"]["timeframe"] = dataset.timeframe
+    run = create_backtest_run(
+      session=session,
+      user_id=user.id,
+      settings_json=base_settings,
+      batch_id=None,
+    )
+    session.commit()
+
+    # Dispatch the single-run task directly — no batch wrapper needed.
+    from background.tasks import run_backtest_task
+    run_backtest_task.delay(str(run.id))
+
+    return BacktestSubmitted(id=run.id, status="queued")
 
   # --- Resolve symbol list ---
   if payload.universe:
@@ -296,6 +319,8 @@ def get_backtest_results(
   return BacktestResults(
     id=run.id,
     status=run.status,
+    symbol=symbol or None,
+    timeframe=timeframe or None,
     summary=summary,
     series=ResultSeries(
       ohlc=ohlc_points,
