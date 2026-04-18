@@ -966,6 +966,11 @@
   };
 
   onMount(() => {
+    const strategyId = new URLSearchParams(window.location.search).get('strategyId');
+    if (strategyId) {
+      loadStrategy(strategyId);
+      return;
+    }
     try {
       const raw = sessionStorage.getItem(IMPORT_KEY);
       if (!raw) return;

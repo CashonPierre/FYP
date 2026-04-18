@@ -52,3 +52,8 @@ def update_strategy(
   strategy.updated_at = datetime.now(timezone.utc)
   session.flush()
   return strategy
+
+
+def delete_strategy(session: Session, strategy: Strategy) -> None:
+  session.delete(strategy)
+  session.flush()

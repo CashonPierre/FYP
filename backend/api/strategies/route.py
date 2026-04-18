@@ -14,7 +14,7 @@ from api.auth.schemas import CurrentUser
 from api.auth.repositories import get_user_by_email
 from app_common.exceptions import NotFoundError
 from .schemas import StrategyCreate, StrategyItem, StrategyDetail
-from .repositories import create_strategy, get_strategies_by_user, get_strategy_by_id, update_strategy
+from .repositories import create_strategy, get_strategies_by_user, get_strategy_by_id, update_strategy, delete_strategy
 
 strategy_router = APIRouter(prefix="/strategies", tags=["Strategy endpoints"])
 
@@ -116,3 +116,24 @@ def overwrite_strategy(
     graph_json=payload.graph_json,
   )
   return StrategyItem.model_validate(updated)
+
+
+@strategy_router.delete(
+  path="/{strategy_id}",
+  status_code=status.HTTP_204_NO_CONTENT,
+)
+def remove_strategy(
+  strategy_id: uuid.UUID,
+  current_user: CurrentUser = Depends(get_current_user),
+  session: Session = Depends(get_session),
+) -> None:
+  """Delete one of the current user's saved strategies."""
+  user = get_user_by_email(session=session, email=current_user.email)
+  if not user:
+    raise NotFoundError(message="User not found")
+
+  strategy: Strategy | None = get_strategy_by_id(session=session, strategy_id=strategy_id)
+  if not strategy or strategy.user_id != user.id:
+    raise NotFoundError(message="Strategy not found")
+
+  delete_strategy(session=session, strategy=strategy)
