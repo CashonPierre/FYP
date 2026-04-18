@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     app_host: str = Field(default="localhost")
     app_port: int = Field(default=8000)
     debug: bool = Field(default=True)
+    public_api_url: str = Field(default="")
 
     # Database
     database: str = Field(default="appdb")

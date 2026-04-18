@@ -19,8 +19,8 @@ def _verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def generate_verify_url(host_prefix: str, token: str) -> str:
-    verify_url: str = f"http://{settings.app_host}:{settings.app_port}{host_prefix}/verify-email?token={token}"
-    return verify_url
+    base = settings.public_api_url or f"http://{settings.app_host}:{settings.app_port}"
+    return f"{base.rstrip('/')}{host_prefix}/verify-email?token={token}"
 
 
 def generate_reset_url(token: str) -> str:
