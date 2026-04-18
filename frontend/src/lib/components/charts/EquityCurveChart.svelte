@@ -4,16 +4,20 @@
     equity: number;
   };
 
+  export type ValueFormat = 'currency' | 'nav';
+
   let {
     points,
     benchmark = [],
     benchmarkLabel = 'Benchmark',
     height = 220,
+    valueFormat = 'currency',
   }: {
     points: EquityPoint[];
     benchmark?: EquityPoint[];
     benchmarkLabel?: string;
     height?: number;
+    valueFormat?: ValueFormat;
   } = $props();
 
   const WIDTH = 1000;
@@ -53,6 +57,15 @@
       currency: "USD",
       maximumFractionDigits: 0,
     }).format(value);
+
+  const fmtPercent = (value: number) =>
+    new Intl.NumberFormat("en-US", {
+      style: "percent",
+      maximumFractionDigits: 0,
+    }).format(value);
+
+  const fmtValue = (value: number) =>
+    valueFormat === 'nav' ? fmtPercent(value) : fmtCurrency(value);
 
   const buildPath = (series: EquityPoint[]) => {
     if (series.length === 0) return "";
@@ -111,7 +124,7 @@
         font-size="11"
         fill="var(--muted-foreground)"
       >
-        {fmtCurrency(tick.v)}
+        {fmtValue(tick.v)}
       </text>
     {/each}
   {/if}

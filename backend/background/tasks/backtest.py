@@ -325,11 +325,13 @@ def run_backtest(self: Task, run_id: str) -> None:
     engine.add_strategy(strategy)
 
     # Push market data events one bar at a time so we can snapshot the
-    # portfolio's current_capital after each bar. That gives us a step-shaped
-    # equity curve (flat between trades, step on each close) without changing
-    # engine semantics — run() just drains the queue each call.
+    # portfolio NAV after each bar. NAV = realized capital + mark-to-market
+    # value of any open positions; without the unrealized leg the curve stays
+    # flat through any period the strategy is holding (a long-only strategy
+    # with no exit would otherwise look like a straight line).
     equity_snapshots: list[tuple[datetime, float]] = []
     portfolio = engine._portfolio
+    position_manager = engine._positionManager
     for bar in bars:
       ts = int(bar.time.strftime("%Y%m%d"))
       payload = MarketDataPayload(
@@ -344,13 +346,19 @@ def run_backtest(self: Task, run_id: str) -> None:
       )
       engine.push_event(MarketDataEvent(timestamp=ts, payload=payload))
       engine.run()
-      equity_snapshots.append((bar.time, float(portfolio.current_capital)))
+      nav = float(portfolio.current_capital) + float(
+        position_manager.total_unrealized_pnl
+      )
+      equity_snapshots.append((bar.time, nav))
 
     # --- 6. Extract results ---
     metrics = portfolio.get_trading_metrics()
     engine_trades = portfolio._trades
-    final_capital = portfolio.current_capital
-    total_return = portfolio.total_return / 100  # convert % to decimal
+    final_nav = float(portfolio.current_capital) + float(
+      position_manager.total_unrealized_pnl
+    )
+    final_capital = final_nav
+    total_return = (final_nav - initial_capital) / initial_capital if initial_capital else 0.0
 
     # --- 7. Store RunMetrics ---
     run_metrics = RunMetrics(

@@ -299,12 +299,21 @@
     return () => clearInterval(pollTimer);
   });
 
-  const benchmark = $derived.by<EquityPoint[]>(() => {
+  // NAV-rebased series: both start at 1.0 (= 100%) so relative performance is
+  // comparable regardless of dollar scale. Raw dollars are still available in
+  // the CSV export and summary cards.
+  const equityNav = $derived.by<EquityPoint[]>(() => {
+    if (equity.length === 0) return [];
+    const base = apiResults?.summary?.initial_capital ?? equity[0]?.equity;
+    if (!base) return [];
+    return equity.map((p) => ({ time: p.time, equity: p.equity / base }));
+  });
+
+  const benchmarkNav = $derived.by<EquityPoint[]>(() => {
     if (ohlc.length === 0) return [];
-    const initial = apiResults?.summary?.initial_capital ?? 10000;
     const first = ohlc[0].close;
     if (!first) return [];
-    return ohlc.map((b) => ({ time: b.time, equity: (initial * b.close) / first }));
+    return ohlc.map((b) => ({ time: b.time, equity: b.close / first }));
   });
 
   const summary = $derived.by(() => {
@@ -500,13 +509,14 @@
       <Card.Root class="border">
         <Card.Header>
           <Card.Title class="text-base">Equity Curve</Card.Title>
-          <Card.Description>Portfolio value over time.</Card.Description>
+          <Card.Description>Portfolio NAV, rebased to 100% at start.</Card.Description>
         </Card.Header>
         <Card.CardContent>
           <EquityCurveChart
-            points={equity}
-            benchmark={benchmark}
+            points={equityNav}
+            benchmark={benchmarkNav}
             benchmarkLabel={`Buy & Hold ${summary.triggerSymbol}`}
+            valueFormat="nav"
             height={220}
           />
         </Card.CardContent>
