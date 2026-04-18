@@ -7,3 +7,4 @@ from .run_metrics import RunMetrics as RunMetrics
 from .trades import Trade as Trade
 from .equity_points import EquityPoint as EquityPoint
 from .user_datasets import UserDataset as UserDataset, UserOhlcBar as UserOhlcBar
+from .fundamental_snapshots import FundamentalSnapshot as FundamentalSnapshot
