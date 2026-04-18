@@ -1112,19 +1112,15 @@
     }
   };
 
-  const runBacktest = async () => {
-    if (hasErrors) return;
+  type ParamOverride = { nodeId: string; paramKey: string; value: number };
 
-    const token = localStorage.getItem('token');
-    if (!token) {
-      toast.error('Not logged in');
-      goto('/login');
-      return;
-    }
-
+  const buildSubmitBody = (override?: ParamOverride): {
+    body: Record<string, unknown>;
+    symbolsList?: string[];
+    universeKey?: string;
+  } | null => {
     const exportPayload = buildExportPayload();
 
-    // Resolve multi-symbol source if enabled
     let symbolsList: string[] | undefined;
     let universeKey: string | undefined;
     if (assetMode === 'multi') {
@@ -1137,12 +1133,22 @@
           .filter(Boolean);
         if (symbolsList.length === 0) {
           toast.error('Enter symbols or pick a universe');
-          return;
+          return null;
         }
       }
     }
 
-    // Transform camelCase frontend format → snake_case backend format
+    const nodesOut = exportPayload.graph.nodes.map((n) => {
+      const data: Record<string, unknown> = { ...(n.params ?? {}) };
+      if (override && override.nodeId === n.id) data[override.paramKey] = override.value;
+      return {
+        id: n.id,
+        type: n.type,
+        position: { x: n.x, y: n.y },
+        data,
+      };
+    });
+
     const body: Record<string, unknown> = {
       version: exportPayload.version,
       settings: {
@@ -1155,12 +1161,7 @@
         slippage_bps: exportPayload.settings.slippageBps ?? 0,
       },
       graph: {
-        nodes: exportPayload.graph.nodes.map((n) => ({
-          id: n.id,
-          type: n.type,
-          position: { x: n.x, y: n.y },
-          data: n.params ?? {},
-        })),
+        nodes: nodesOut,
         edges: exportPayload.graph.edges.map((e) => ({
           id: e.id,
           source: e.source,
@@ -1172,6 +1173,22 @@
     };
     if (symbolsList) body.symbols = symbolsList;
     if (universeKey) body.universe = universeKey;
+    return { body, symbolsList, universeKey };
+  };
+
+  const runBacktest = async () => {
+    if (hasErrors) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Not logged in');
+      goto('/login');
+      return;
+    }
+
+    const built = buildSubmitBody();
+    if (!built) return;
+    const { body } = built;
 
     let resp: Response;
     try {
@@ -1208,6 +1225,140 @@
     toast.success('Backtest queued');
     const isBatch = (data.run_ids?.length ?? 0) > 0 && !!data.batch_id;
     goto(isBatch ? `/app/backtests/batch/${data.batch_id}` : `/app/backtests/${data.id}`);
+  };
+
+  // ---------------------------------------------------------------------
+  // Parameter Sweep
+  // ---------------------------------------------------------------------
+
+  let showSweep = $state(false);
+  let sweepNodeId = $state<string>('');
+  let sweepParamKey = $state<string>('');
+  let sweepValuesText = $state('');
+  let sweepRunning = $state(false);
+
+  const sweepableNodes = $derived.by(() =>
+    nodes.filter((n) => {
+      if (!n.params) return false;
+      return Object.entries(n.params).some(([, v]) => typeof v === 'number');
+    })
+  );
+
+  const selectedSweepNode = $derived.by(() =>
+    sweepableNodes.find((n) => n.id === sweepNodeId) ?? null
+  );
+
+  const sweepParamOptions = $derived.by(() => {
+    if (!selectedSweepNode) return [] as string[];
+    return Object.entries(selectedSweepNode.params)
+      .filter(([, v]) => typeof v === 'number')
+      .map(([k]) => k);
+  });
+
+  const parsedSweepValues = $derived.by(() => {
+    const raw = sweepValuesText
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const out: number[] = [];
+    for (const tok of raw) {
+      const n = Number(tok);
+      if (Number.isFinite(n)) out.push(n);
+    }
+    return out;
+  });
+
+  const openSweep = () => {
+    const first = sweepableNodes[0];
+    sweepNodeId = first?.id ?? '';
+    sweepParamKey = '';
+    sweepValuesText = '';
+    showSweep = true;
+  };
+
+  const runSweep = async () => {
+    if (hasErrors) {
+      toast.error('Fix builder errors before sweeping');
+      return;
+    }
+    if (assetMode !== 'single') {
+      toast.error('Parameter sweep only supports single-symbol mode');
+      return;
+    }
+    if (!sweepNodeId || !sweepParamKey) {
+      toast.error('Pick a node and parameter');
+      return;
+    }
+    const values = parsedSweepValues;
+    if (values.length < 2) {
+      toast.error('Enter at least 2 numeric values');
+      return;
+    }
+    if (values.length > 12) {
+      toast.error('Max 12 values per sweep');
+      return;
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Not logged in');
+      goto('/login');
+      return;
+    }
+
+    const nodeLabel = selectedSweepNode?.label ?? selectedSweepNode?.type ?? sweepNodeId;
+
+    sweepRunning = true;
+    const results: { value: number; runId: string }[] = [];
+    try {
+      for (const value of values) {
+        const built = buildSubmitBody({ nodeId: sweepNodeId, paramKey: sweepParamKey, value });
+        if (!built) {
+          sweepRunning = false;
+          return;
+        }
+        const resp = await fetch(`${BACKEND}/backtests`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(built.body),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          let msg = 'Submit failed';
+          try {
+            msg = (JSON.parse(text) as { detail?: string }).detail ?? msg;
+          } catch { /* ignore */ }
+          toast.error(`${nodeLabel} ${sweepParamKey}=${value}: ${msg}`);
+          sweepRunning = false;
+          return;
+        }
+        const data = (await resp.json()) as { id: string };
+        results.push({ value, runId: data.id });
+      }
+    } catch {
+      toast.error('Could not reach backend — is it running?');
+      sweepRunning = false;
+      return;
+    }
+
+    const sweepId = `sweep_${Date.now()}`;
+    sessionStorage.setItem(
+      `sweep:${sweepId}`,
+      JSON.stringify({
+        id: sweepId,
+        nodeLabel,
+        paramKey: sweepParamKey,
+        runs: results,
+        createdAt: new Date().toISOString(),
+      })
+    );
+    toast.success(`Sweep queued: ${results.length} runs`);
+    sweepRunning = false;
+    showSweep = false;
+    goto(`/app/backtests/sweep/${sweepId}`);
   };
 </script>
 
@@ -1309,9 +1460,103 @@
     <Button variant="outline" onclick={deleteSelected} disabled={!selectedId}>
       Delete
     </Button>
+    <Button
+      variant="outline"
+      onclick={openSweep}
+      disabled={nodes.length === 0 || hasErrors || sweepableNodes.length === 0}
+    >
+      Sweep
+    </Button>
     <Button onclick={runBacktest} disabled={nodes.length === 0 || hasErrors}>Run</Button>
   </div>
 </div>
+
+{#if showSweep}
+  <div
+    class="fixed inset-0 z-50 bg-black/40"
+    role="dialog"
+    aria-modal="true"
+    onpointerdown={(e) => { if (e.currentTarget === e.target) showSweep = false; }}
+  >
+    <div class="mx-auto mt-16 w-[min(560px,calc(100vw-2rem))] rounded-lg border bg-background shadow-lg">
+      <div class="flex items-center justify-between border-b px-4 py-3">
+        <div class="font-semibold">Parameter Sweep</div>
+        <button
+          class="rounded-md px-2 py-1 text-sm hover:bg-accent"
+          type="button"
+          onclick={() => (showSweep = false)}
+        >
+          Close
+        </button>
+      </div>
+      <div class="space-y-4 p-4 text-sm">
+        <p class="text-muted-foreground">
+          Run the same strategy with different values for one numeric parameter.
+          Results land on a dedicated sweep page for side-by-side comparison.
+        </p>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div class="space-y-1">
+            <Label for="sweepNode">Node</Label>
+            <select
+              id="sweepNode"
+              class="w-full rounded-md border bg-background px-3 py-2"
+              bind:value={sweepNodeId}
+              onchange={() => (sweepParamKey = '')}
+            >
+              <option value="">— Select —</option>
+              {#each sweepableNodes as n (n.id)}
+                <option value={n.id}>{n.label} ({n.type})</option>
+              {/each}
+            </select>
+          </div>
+          <div class="space-y-1">
+            <Label for="sweepParam">Parameter</Label>
+            <select
+              id="sweepParam"
+              class="w-full rounded-md border bg-background px-3 py-2"
+              bind:value={sweepParamKey}
+              disabled={!selectedSweepNode}
+            >
+              <option value="">— Select —</option>
+              {#each sweepParamOptions as k (k)}
+                <option value={k}>{k}</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+        <div class="space-y-1">
+          <Label for="sweepValues">Values (comma-separated, 2–12)</Label>
+          <Input
+            id="sweepValues"
+            bind:value={sweepValuesText}
+            placeholder="10, 20, 50, 100"
+          />
+          <div class="text-xs text-muted-foreground">
+            {parsedSweepValues.length > 0
+              ? `Will run ${parsedSweepValues.length} backtests: ${parsedSweepValues.join(', ')}`
+              : 'Each value = one backtest run.'}
+          </div>
+        </div>
+        {#if assetMode !== 'single'}
+          <div class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-200">
+            Parameter sweep currently supports single-symbol mode only. Switch to Single Symbol to run a sweep.
+          </div>
+        {/if}
+        <div class="flex justify-end gap-2">
+          <Button variant="outline" onclick={() => (showSweep = false)} disabled={sweepRunning}>
+            Cancel
+          </Button>
+          <Button
+            onclick={runSweep}
+            disabled={sweepRunning || assetMode !== 'single' || parsedSweepValues.length < 2 || !sweepNodeId || !sweepParamKey}
+          >
+            {sweepRunning ? 'Submitting…' : `Run Sweep (${parsedSweepValues.length})`}
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if showExport || showImport}
   <div
