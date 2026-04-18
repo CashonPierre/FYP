@@ -22,6 +22,8 @@ class RunMetrics(Base):
   max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
   volatility: Mapped[float | None] = mapped_column(Float, nullable=True)
   sharpe: Mapped[float | None] = mapped_column(Float, nullable=True)
+  sortino: Mapped[float | None] = mapped_column(Float, nullable=True)
+  calmar: Mapped[float | None] = mapped_column(Float, nullable=True)
   total_trades: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
   win_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
   fees: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

@@ -358,16 +358,30 @@ def run_backtest(self: Task, run_id: str) -> None:
       position_manager.total_unrealized_pnl
     )
     final_capital = final_nav
-    total_return = (final_nav - initial_capital) / initial_capital if initial_capital else 0.0
+
+    # Derive all portfolio-level ratios from the NAV series rather than
+    # trusting the engine's TradingMetrics (which leaves sharpe/max_dd
+    # at None and never populates _daily_returns).
+    from background.tasks._perf_metrics import compute as _compute_perf
+    bars_per_year = {"1D": 252, "1W": 52, "1M": 12}.get(timeframe, 252)
+    perf = _compute_perf(
+      equity=equity_snapshots,
+      initial_capital=initial_capital,
+      bars_per_year=bars_per_year,
+    )
 
     # --- 7. Store RunMetrics ---
     run_metrics = RunMetrics(
       run_id=run.id,
       initial_capital=initial_capital,
       final_nav=final_capital,
-      total_return=total_return,
-      max_drawdown=metrics.max_drawdown,
-      sharpe=metrics.sharpe_ratio,
+      total_return=perf.total_return,
+      annualized_return=perf.annualized_return,
+      volatility=perf.volatility,
+      max_drawdown=perf.max_drawdown,
+      sharpe=perf.sharpe,
+      sortino=perf.sortino,
+      calmar=perf.calmar,
       total_trades=metrics.total_trades,
       win_rate=metrics.win_rate / 100 if metrics.win_rate else None,
       fees=0.0,

@@ -1,6 +1,7 @@
 """
 Tests for /backtests endpoints.
 """
+import json
 import uuid
 from unittest.mock import patch, MagicMock
 
@@ -235,3 +236,96 @@ def test_submit_no_symbol_source_returns_422(client: TestClient, verified_user, 
   }
   resp = client.post("/backtests", json=bad_payload, headers=auth_headers)
   assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Results payload wiring (Sharpe / Sortino / drawdown / Calmar / metadata)
+# ---------------------------------------------------------------------------
+
+def test_results_exposes_full_performance_metrics(
+  client: TestClient, verified_user, auth_headers, db_session
+):
+  """A completed run with seeded RunMetrics returns the full metric set.
+
+  Regression: before Task 3, Sharpe / Sortino / drawdown were always null
+  because metrics came from the engine's `TradingMetrics` (which leaves
+  them `None`). We now compute them from the equity curve, and this test
+  pins that the full set is surfaced through the API.
+  """
+  from datetime import datetime, timezone
+
+  from database.models import BacktestRun, RunMetrics, Strategy
+
+  strategy = Strategy(
+    id=uuid.uuid4(),
+    user_id=verified_user.id,
+    name="Test DCA Strategy",
+    graph_json=json.dumps({"nodes": [], "edges": []}),
+  )
+  db_session.add(strategy)
+
+  settings_payload = {
+    "settings": {
+      "symbol": "AAPL",
+      "timeframe": "1D",
+      "start_date": "2020-01-01",
+      "end_date": "2021-01-01",
+      "initial_capital": 10000.0,
+      "fees_bps": 0.0,
+      "slippage_bps": 0.0,
+    },
+    "graph": {"nodes": [], "edges": []},
+  }
+  run = BacktestRun(
+    id=uuid.uuid4(),
+    user_id=verified_user.id,
+    strategy_id=strategy.id,
+    status="completed",
+    settings_json=json.dumps(settings_payload),
+    started_at=datetime.now(timezone.utc),
+    ended_at=datetime.now(timezone.utc),
+  )
+  db_session.add(run)
+  db_session.flush()
+
+  db_session.add(
+    RunMetrics(
+      run_id=run.id,
+      initial_capital=10000.0,
+      final_nav=12500.0,
+      total_return=0.25,
+      annualized_return=0.18,
+      max_drawdown=-0.08,
+      volatility=0.15,
+      sharpe=1.2,
+      sortino=1.65,
+      calmar=2.25,
+      total_trades=24,
+      win_rate=0.62,
+      fees=0.0,
+      slippage=0.0,
+    )
+  )
+  db_session.flush()
+
+  resp = client.get(f"/backtests/{run.id}/results", headers=auth_headers)
+  assert resp.status_code == 200
+  data = resp.json()
+
+  assert data["status"] == "completed"
+  assert data["symbol"] == "AAPL"
+  assert data["timeframe"] == "1D"
+  assert data["start_date"] == "2020-01-01"
+  assert data["end_date"] == "2021-01-01"
+  assert data["strategy_name"] == "Test DCA Strategy"
+
+  summary = data["summary"]
+  assert summary is not None
+  # Ratios and drawdown — none of these may silently drop to null.
+  assert summary["sharpe"] == 1.2
+  assert summary["sortino"] == 1.65
+  assert summary["calmar"] == 2.25
+  assert summary["max_drawdown"] == -0.08
+  assert summary["volatility"] == 0.15
+  assert summary["annualized_return"] == 0.18
+  assert summary["total_return"] == 0.25
