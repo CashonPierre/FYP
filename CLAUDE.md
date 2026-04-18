@@ -22,6 +22,9 @@ Web-based backtesting platform as a Final Year Project. Users build trading stra
 
 ## Dev Setup
 ```bash
+# 0. One-time per clone: enable repo git hooks (guards engine SHA drift)
+git config core.hooksPath .githooks
+
 # 1. Start DB (Docker must be running first)
 docker start timescaledb        # user: dbuser, pass: dbadmin, db: appdb, port: 5432
 

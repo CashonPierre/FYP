@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Guards against submodule/Dockerfile drift.
+# Fails the commit if trading_engine submodule SHA != TRADING_ENGINE_SHA in Dockerfile.
+# Enable once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+
+submodule_sha=$(git submodule status trading_engine | awk '{print $1}' | sed 's/^[-+]//')
+dockerfile_sha=$(grep -E '^ARG TRADING_ENGINE_SHA=' Dockerfile | cut -d= -f2)
+
+if [ -z "$submodule_sha" ] || [ -z "$dockerfile_sha" ]; then
+  echo "pre-commit: could not read submodule or Dockerfile SHA" >&2
+  exit 1
+fi
+
+if [ "$submodule_sha" != "$dockerfile_sha" ]; then
+  echo "pre-commit: trading_engine SHA drift" >&2
+  echo "  submodule:  $submodule_sha" >&2
+  echo "  Dockerfile: $dockerfile_sha" >&2
+  echo "Bump TRADING_ENGINE_SHA in Dockerfile to match the submodule, then re-stage." >&2
+  exit 1
+fi
