@@ -2,12 +2,13 @@
 GraphStrategy — evaluates a visual strategy graph per bar.
 
 Supported nodes:
-  Triggers  : OnBar
-  Data      : Data, Constant, Volume
-  Indicators: SMA, EMA, RSI, MACD, BollingerBands, ATR, Stochastic,
-              ROC, WilliamsR, CCI
-  Conditions: IfAbove, IfBelow, IfCrossAbove, IfCrossBelow
-  Actions   : Buy, Sell
+  Triggers   : OnBar
+  Data       : Data, Constant, Volume
+  Indicators : SMA, EMA, RSI, MACD, BollingerBands, ATR, Stochastic,
+               ROC, WilliamsR, CCI, KDJ, MFI, OBV, KST
+  Conditions : IfAbove, IfBelow, IfCrossAbove, IfCrossBelow,
+               And, Or, Not, TimeWindow, Position
+  Actions    : Buy, Sell, StopLoss, TakeProfit, TrailingStop
 
 Graph JSON format (same as builder export):
   nodes: [{id, type, data: {params: {...}}, ...}]
@@ -73,6 +74,7 @@ _INDICATOR_TYPES = frozenset({
   "SMA", "EMA", "RSI",
   "MACD", "BollingerBands", "ATR", "Stochastic",
   "ROC", "WilliamsR", "CCI",
+  "KDJ", "MFI", "OBV", "KST",
 })
 
 
@@ -119,13 +121,18 @@ class GraphStrategy:
 
     self._exec_order: list[str] = self._topo_sort()
 
-    # Position guard
-    wired_sell_ids = {
+    # Position guard — any exit-producing node counts, not just Sell
+    _EXIT_NODE_TYPES = {"Sell", "StopLoss", "TakeProfit", "TrailingStop"}
+    wired_exit_ids = {
       tgt for (tgt, _) in self._input_map
-      if self._nodes.get(tgt, {}).get("type") == "Sell"
+      if self._nodes.get(tgt, {}).get("type") in _EXIT_NODE_TYPES
     }
-    self._has_exit: bool = bool(wired_sell_ids)
+    self._has_exit: bool = bool(wired_exit_ids)
     self._in_position: bool = False
+
+    # Risk-management state — tracked per entry, reset on exit
+    self._entry_price: float | None = None
+    self._trailing_max: float | None = None
 
     # Rolling-buffer state (fallback for SMA/EMA/RSI when no df provided)
     self._price_buffers: dict[str, deque] = {}
@@ -196,6 +203,7 @@ class GraphStrategy:
     close = pd.Series(df["close"].values, dtype=float)
     high = pd.Series(df["high"].values, dtype=float) if "high" in df.columns else close
     low = pd.Series(df["low"].values, dtype=float) if "low" in df.columns else close
+    volume = pd.Series(df["volume"].values, dtype=float) if "volume" in df.columns else None
 
     def _resolve_price(nid: str) -> pd.Series:
       """Return the input price series for a node, following upstream chain."""
@@ -330,6 +338,71 @@ class GraphStrategy:
           "out": _to_list(result) if result is not None else [None] * len(close)
         }
 
+      elif ntype == "KDJ":
+        length = int(_node_param(node, "length", 9))
+        signal_p = int(_node_param(node, "signal", 3))
+        result = ta.kdj(high, low, close, length=length, signal=signal_p)
+        n_bars = len(close)
+        if result is None or result.empty:
+          self._precomputed[nid] = {
+            "k": [None] * n_bars, "d": [None] * n_bars, "j": [None] * n_bars,
+          }
+        else:
+          cols = result.columns.tolist()
+          # K_*, D_*, J_* — prefix match stable across pandas_ta versions
+          try:
+            k_col = next(c for c in cols if c.startswith("K_"))
+            d_col = next(c for c in cols if c.startswith("D_"))
+            j_col = next(c for c in cols if c.startswith("J_"))
+          except StopIteration:
+            raise ValueError(f"GraphStrategy: unexpected KDJ column names from pandas_ta: {cols}")
+          self._precomputed[nid] = {
+            "k": _to_list(result[k_col]),
+            "d": _to_list(result[d_col]),
+            "j": _to_list(result[j_col]),
+          }
+
+      elif ntype == "MFI":
+        period = int(_node_param(node, "period", 14))
+        if volume is None:
+          self._precomputed[nid] = {"out": [None] * len(close)}
+        else:
+          result = ta.mfi(high, low, close, volume, length=period)
+          self._precomputed[nid] = {
+            "out": _to_list(result) if result is not None else [None] * len(close)
+          }
+
+      elif ntype == "OBV":
+        if volume is None:
+          self._precomputed[nid] = {"out": [None] * len(close)}
+        else:
+          result = ta.obv(close, volume)
+          self._precomputed[nid] = {
+            "out": _to_list(result) if result is not None else [None] * len(close)
+          }
+
+      elif ntype == "KST":
+        # pandas_ta.kst defaults: roc1=10, roc2=15, roc3=20, roc4=30,
+        # sma1=10, sma2=10, sma3=10, sma4=15, signal=9
+        result = ta.kst(close)
+        n_bars = len(close)
+        if result is None or result.empty:
+          self._precomputed[nid] = {"kst": [None] * n_bars, "signal": [None] * n_bars}
+        else:
+          cols = result.columns.tolist()
+          # KST_* = KST line, KSTs_* = signal line.  Order matters: "KSTs_"
+          # also starts with "KST", so match signal first or use explicit
+          # suffix check on the KST line.
+          try:
+            signal_col = next(c for c in cols if c.startswith("KSTs_"))
+            kst_col    = next(c for c in cols if c.startswith("KST_"))
+          except StopIteration:
+            raise ValueError(f"GraphStrategy: unexpected KST column names from pandas_ta: {cols}")
+          self._precomputed[nid] = {
+            "kst":    _to_list(result[kst_col]),
+            "signal": _to_list(result[signal_col]),
+          }
+
     logger.debug("GraphStrategy: precomputed %d indicator series (%d bars each)",
                  len(self._precomputed), len(close))
 
@@ -366,6 +439,14 @@ class GraphStrategy:
     self._bar_idx += 1
     bar: MarketDataPayload = event.payload
     outputs: dict[str, dict[str, Any]] = {}
+
+    # Track running max close since entry for TrailingStop.  Updated every
+    # bar while in position, cleared on exit.  Using close (not high) keeps
+    # behaviour deterministic across backfills where high may be missing.
+    if self._in_position and self._trailing_max is not None:
+      bar_close = float(bar.Close if bar.Close is not None else bar.price)
+      if bar_close > self._trailing_max:
+        self._trailing_max = bar_close
 
     for nid in self._exec_order:
       node = self._nodes[nid]
@@ -450,10 +531,31 @@ class GraphStrategy:
         else:
           outputs[nid] = {"k": None, "d": None}
 
-      # ── ROC / Williams %R / CCI ────────────────────────────────────
-      elif ntype in ("ROC", "WilliamsR", "CCI"):
+      # ── ROC / Williams %R / CCI / MFI / OBV ────────────────────────
+      elif ntype in ("ROC", "WilliamsR", "CCI", "MFI", "OBV"):
         val = self._precomp_val(nid, "out") if nid in self._precomputed else None
         outputs[nid] = {"out": val}
+
+      # ── KDJ ────────────────────────────────────────────────────────
+      elif ntype == "KDJ":
+        if nid in self._precomputed:
+          outputs[nid] = {
+            "k": self._precomp_val(nid, "k"),
+            "d": self._precomp_val(nid, "d"),
+            "j": self._precomp_val(nid, "j"),
+          }
+        else:
+          outputs[nid] = {"k": None, "d": None, "j": None}
+
+      # ── KST ────────────────────────────────────────────────────────
+      elif ntype == "KST":
+        if nid in self._precomputed:
+          outputs[nid] = {
+            "kst":    self._precomp_val(nid, "kst"),
+            "signal": self._precomp_val(nid, "signal"),
+          }
+        else:
+          outputs[nid] = {"kst": None, "signal": None}
 
       # ── IfAbove ────────────────────────────────────────────────────
       elif ntype == "IfAbove":
@@ -499,6 +601,105 @@ class GraphStrategy:
             crossed = prev_a >= prev_b and a_val < b_val
           outputs[nid] = {"true": True if crossed else None, "false": None if crossed else True}
 
+      # ── And / Or / Not (logical combinators on event signals) ─────
+      elif ntype == "And":
+        a = self._upstream(outputs, nid, "a")
+        b = self._upstream(outputs, nid, "b")
+        fires = bool(a) and bool(b)
+        outputs[nid] = {
+          "true":  True if fires else None,
+          "false": None if fires else True,
+        }
+
+      elif ntype == "Or":
+        a = self._upstream(outputs, nid, "a")
+        b = self._upstream(outputs, nid, "b")
+        fires = bool(a) or bool(b)
+        outputs[nid] = {
+          "true":  True if fires else None,
+          "false": None if fires else True,
+        }
+
+      elif ntype == "Not":
+        inp = self._upstream(outputs, nid, "in")
+        fires = not bool(inp)
+        outputs[nid] = {
+          "true":  True if fires else None,
+          "false": None if fires else True,
+        }
+
+      # ── TimeWindow (bar-date within [start, end]) ─────────────────
+      elif ntype == "TimeWindow":
+        trigger = self._upstream(outputs, nid, "in")
+        # bar.timestamp is yyyymmdd int (see backend/background/tasks/backtest.py)
+        ts = int(getattr(bar, "timestamp", 0) or 0)
+        start_raw = str(_node_param(node, "start", "") or "").replace("-", "")
+        end_raw   = str(_node_param(node, "end",   "") or "").replace("-", "")
+        try:
+          start_i = int(start_raw) if start_raw else 0
+          end_i   = int(end_raw)   if end_raw   else 99999999
+        except ValueError:
+          start_i, end_i = 0, 99999999
+        if trigger is None or ts == 0:
+          outputs[nid] = {"true": None, "false": None}
+        elif start_i <= ts <= end_i:
+          outputs[nid] = {"true": True, "false": None}
+        else:
+          outputs[nid] = {"true": None, "false": True}
+
+      # ── Position (flat/holding state check) ───────────────────────
+      elif ntype == "Position":
+        trigger = self._upstream(outputs, nid, "in")
+        if trigger is None:
+          outputs[nid] = {"flat": None, "holding": None}
+        else:
+          outputs[nid] = {
+            "flat":    True if not self._in_position else None,
+            "holding": True if self._in_position else None,
+          }
+
+      # ── StopLoss (exit when close ≤ entry × (1 − pct/100)) ────────
+      elif ntype == "StopLoss":
+        trigger = self._upstream(outputs, nid, "in")
+        pct = float(_node_param(node, "pct", 2.0))
+        if trigger and self._in_position and self._entry_price:
+          close = float(bar.Close if bar.Close is not None else bar.price)
+          threshold = self._entry_price * (1.0 - pct / 100.0)
+          if close <= threshold:
+            outputs[nid] = {"signal": CloseSignal(order_id=None)}
+          else:
+            outputs[nid] = {"signal": None}
+        else:
+          outputs[nid] = {"signal": None}
+
+      # ── TakeProfit (exit when close ≥ entry × (1 + pct/100)) ──────
+      elif ntype == "TakeProfit":
+        trigger = self._upstream(outputs, nid, "in")
+        pct = float(_node_param(node, "pct", 5.0))
+        if trigger and self._in_position and self._entry_price:
+          close = float(bar.Close if bar.Close is not None else bar.price)
+          threshold = self._entry_price * (1.0 + pct / 100.0)
+          if close >= threshold:
+            outputs[nid] = {"signal": CloseSignal(order_id=None)}
+          else:
+            outputs[nid] = {"signal": None}
+        else:
+          outputs[nid] = {"signal": None}
+
+      # ── TrailingStop (exit when close ≤ max_since_entry × (1 − pct/100)) ──
+      elif ntype == "TrailingStop":
+        trigger = self._upstream(outputs, nid, "in")
+        pct = float(_node_param(node, "pct", 3.0))
+        if trigger and self._in_position and self._trailing_max:
+          close = float(bar.Close if bar.Close is not None else bar.price)
+          threshold = self._trailing_max * (1.0 - pct / 100.0)
+          if close <= threshold:
+            outputs[nid] = {"signal": CloseSignal(order_id=None)}
+          else:
+            outputs[nid] = {"signal": None}
+        else:
+          outputs[nid] = {"signal": None}
+
       # ── Constant ───────────────────────────────────────────────────
       elif ntype == "Constant":
         value = float(_node_param(node, "value", 0))
@@ -531,16 +732,19 @@ class GraphStrategy:
         else:
           outputs[nid] = {"signal": None}
 
-    # Collect signals — Sell checked first so exit on same bar as entry wins.
+    # Collect signals — exits checked first so a stop-out on entry bar wins.
+    _exit_types = ("Sell", "StopLoss", "TakeProfit", "TrailingStop")
     for nid in self._exec_order:
       ntype = self._nodes[nid].get("type")
       sig = outputs.get(nid, {}).get("signal")
       if sig is None:
         continue
 
-      if ntype == "Sell":
+      if ntype in _exit_types:
         if self._in_position:
           self._in_position = False
+          self._entry_price = None
+          self._trailing_max = None
           return sig
 
       elif ntype == "Buy":
@@ -548,6 +752,9 @@ class GraphStrategy:
           pass
         else:
           self._in_position = True
+          entry = float(bar.Close if bar.Close is not None else bar.price)
+          self._entry_price = entry
+          self._trailing_max = entry
           return sig
 
     return NullSignal()
@@ -628,6 +835,8 @@ class GraphStrategy:
     self._rsi_state.clear()
     self._cross_prev.clear()
     self._in_position = False
+    self._entry_price = None
+    self._trailing_max = None
     self._bar_idx = -1
     # _precomputed intentionally NOT cleared — derived from the DataFrame
     # passed at construction; _bar_idx reset so replay starts at position 0.

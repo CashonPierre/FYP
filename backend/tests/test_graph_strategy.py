@@ -1135,3 +1135,217 @@ class TestHighPriorityNodes:
     assert "out" in gs._precomputed["cci"]
     # Must produce at least one numeric value
     assert any(v is not None for v in gs._precomputed["cci"]["out"])
+
+  def test_kdj_precomputed_has_k_d_j(self):
+    """KDJ node stores k, d, j series."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("kdj", "KDJ", {"length": 9, "signal": 3})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "kdj" in gs._precomputed
+    for handle in ("k", "d", "j"):
+      assert handle in gs._precomputed["kdj"]
+      assert any(v is not None for v in gs._precomputed["kdj"][handle])
+
+  def test_mfi_precomputed_in_valid_range(self):
+    """MFI must be in [0, 100] where defined."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("mfi", "MFI", {"period": 14})], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    out = gs._precomputed["mfi"]["out"]
+    assert any(v is not None for v in out)
+    for v in out:
+      if v is not None:
+        assert 0.0 <= v <= 100.0, f"MFI out of range: {v}"
+
+  def test_obv_precomputed_single_out(self):
+    """OBV node stores a single 'out' series — cumulative from bar 1."""
+    df = _make_ohlcv_df(40)
+    g = _make_graph([_node("ob", "OnBar"), _node("obv", "OBV")], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    out = gs._precomputed["obv"]["out"]
+    # OBV needs a prior close to infer direction → bar 0 is None, then defined
+    assert all(v is not None for v in out[1:])
+
+  def test_kst_precomputed_has_kst_and_signal(self):
+    """KST node stores kst (line) and signal (9-period SMA of KST)."""
+    df = _make_ohlcv_df(80)  # KST needs ~60 bars for default params
+    g = _make_graph([_node("ob", "OnBar"), _node("kst", "KST")], [])
+    gs = GraphStrategy(g, ohlcv_df=df)
+    assert "kst" in gs._precomputed
+    for handle in ("kst", "signal"):
+      assert handle in gs._precomputed["kst"]
+    assert any(v is not None for v in gs._precomputed["kst"]["kst"])
+    assert any(v is not None for v in gs._precomputed["kst"]["signal"])
+
+
+# ---------------------------------------------------------------------------
+# Logical combinators + TimeWindow + Position + Risk-management exits
+# ---------------------------------------------------------------------------
+
+def _event_ts(price: float, timestamp: int, symbol: str = "T"):
+  """Build a MarketDataEvent with a yyyymmdd-int timestamp."""
+  from events.payloads.market_payload import MarketDataPayload
+  from events.event import MarketDataEvent
+  return MarketDataEvent(
+    payload=MarketDataPayload(
+      timestamp=timestamp, symbol=symbol, price=price, volume=0, Close=price
+    )
+  )
+
+
+class TestLogicalCombinators:
+  def test_and_fires_only_when_both_true(self):
+    """And: IfAbove(Data>10) AND IfAbove(Data>20) → only True when price > 20."""
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("c10", "Constant", {"value": 10}),
+       _node("c20", "Constant", {"value": 20}),
+       _node("if1", "IfAbove"), _node("if2", "IfAbove"),
+       _node("and", "And"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if1"),   _edge("c10", "if1", tgt_h="b"), _edge("ob", "if1", tgt_h="a"),
+       _edge("ob", "if2"),   _edge("c20", "if2", tgt_h="b"), _edge("ob", "if2", tgt_h="a"),
+       _edge("if1", "and", src_h="true", tgt_h="a"),
+       _edge("if2", "and", src_h="true", tgt_h="b"),
+       _edge("and", "buy",  src_h="true")],
+    )
+    gs = GraphStrategy(g)
+    # price=15: if1 true, if2 false → And false
+    sig = gs.on_event(_event(15.0)).__class__.__name__
+    assert sig == "NullSignal"
+    # price=25: both true → And fires → Buy
+    sig = gs.on_event(_event(25.0)).__class__.__name__
+    assert sig == "AddSignal"
+
+  def test_or_fires_when_either_true(self):
+    """Or: fires when at least one input is true."""
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("c50", "Constant", {"value": 50}),
+       _node("if", "IfAbove"),
+       _node("or", "Or"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if"), _edge("c50", "if", tgt_h="b"), _edge("ob", "if", tgt_h="a"),
+       _edge("if", "or", src_h="true", tgt_h="a"),
+       _edge("if", "or", src_h="false", tgt_h="b"),
+       _edge("or", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g)
+    # Either true or false handle fires each bar → Or is always true
+    sig = gs.on_event(_event(10.0)).__class__.__name__
+    assert sig == "AddSignal"
+
+  def test_not_inverts_condition(self):
+    """Not: true when input is falsy."""
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("c50", "Constant", {"value": 50}),
+       _node("if", "IfAbove"),
+       _node("not", "Not"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if"), _edge("c50", "if", tgt_h="b"), _edge("ob", "if", tgt_h="a"),
+       _edge("if", "not", src_h="true"),
+       _edge("not", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g)
+    # price=30 < 50 → IfAbove.true is None → Not fires → Buy
+    sig = gs.on_event(_event(30.0)).__class__.__name__
+    assert sig == "AddSignal"
+
+
+class TestTimeWindow:
+  def test_in_window_fires_buy(self):
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("tw", "TimeWindow", {"start": "2015-01-01", "end": "2015-12-31"}),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "tw"), _edge("tw", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g)
+    # 2015-06-15 is inside window
+    sig = gs.on_event(_event_ts(100.0, 20150615)).__class__.__name__
+    assert sig == "AddSignal"
+
+  def test_out_of_window_no_buy(self):
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("tw", "TimeWindow", {"start": "2015-01-01", "end": "2015-12-31"}),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "tw"), _edge("tw", "buy", src_h="true")],
+    )
+    gs = GraphStrategy(g)
+    # 2020-06-15 is outside window
+    sig = gs.on_event(_event_ts(100.0, 20200615)).__class__.__name__
+    assert sig == "NullSignal"
+
+
+class TestPositionNode:
+  def test_flat_fires_buy_when_not_in_position(self):
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("pos", "Position"),
+       _node("buy", "Buy", amount=1.0),
+       _node("sell", "Sell")],
+      [_edge("ob", "pos"),
+       _edge("pos", "buy",  src_h="flat"),
+       _edge("pos", "sell", src_h="holding")],
+    )
+    gs = GraphStrategy(g)
+    # Bar 1: flat → Buy fires
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    assert gs._in_position is True
+    # Bar 2: holding → Sell fires
+    assert gs.on_event(_event(101.0)).__class__.__name__ == "CloseSignal"
+    assert gs._in_position is False
+
+
+class TestRiskManagementExits:
+  def test_stoploss_exits_on_drop(self):
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("buy", "Buy", amount=1.0),
+       _node("sl",  "StopLoss", {"pct": 5.0})],
+      [_edge("ob", "buy"), _edge("ob", "sl")],
+    )
+    gs = GraphStrategy(g)
+    # Bar 1: Buy at 100
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    assert gs._entry_price == 100.0
+    # Bar 2: price 96 → drop 4% → StopLoss inactive
+    assert gs.on_event(_event(96.0)).__class__.__name__ == "NullSignal"
+    # Bar 3: price 94 → drop 6% → StopLoss fires CloseSignal
+    assert gs.on_event(_event(94.0)).__class__.__name__ == "CloseSignal"
+    assert gs._in_position is False
+    assert gs._entry_price is None
+
+  def test_takeprofit_exits_on_gain(self):
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("buy", "Buy", amount=1.0),
+       _node("tp",  "TakeProfit", {"pct": 10.0})],
+      [_edge("ob", "buy"), _edge("ob", "tp")],
+    )
+    gs = GraphStrategy(g)
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    assert gs.on_event(_event(105.0)).__class__.__name__ == "NullSignal"
+    assert gs.on_event(_event(111.0)).__class__.__name__ == "CloseSignal"
+    assert gs._in_position is False
+
+  def test_trailingstop_follows_high(self):
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("buy", "Buy", amount=1.0),
+       _node("ts",  "TrailingStop", {"pct": 5.0})],
+      [_edge("ob", "buy"), _edge("ob", "ts")],
+    )
+    gs = GraphStrategy(g)
+    # Enter at 100
+    gs.on_event(_event(100.0))
+    # Rise to 120 → trailing max = 120, threshold = 114
+    gs.on_event(_event(120.0))
+    assert gs._trailing_max == 120.0
+    # Drop to 115 → above 114, no exit
+    assert gs.on_event(_event(115.0)).__class__.__name__ == "NullSignal"
+    # Drop to 113 → below 114, exit
+    assert gs.on_event(_event(113.0)).__class__.__name__ == "CloseSignal"
+    assert gs._trailing_max is None
