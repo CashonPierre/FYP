@@ -9,6 +9,7 @@
   import { cn } from '$lib/utils.js';
   import { toast } from 'svelte-sonner';
   import { BACKEND } from '$lib/config.js';
+  import { STRATEGY_TEMPLATES } from '$lib/strategies/templates.js';
 
   type NodeType =
     | 'OnBar'
@@ -102,6 +103,7 @@
   let didPan = $state(false);
   let showExport = $state(false);
   let showImport = $state(false);
+  let showTemplates = $state(false);
   let exportJson = $state('');
   let importJson = $state('');
   let targetSymbol = $state('AAPL');
@@ -826,7 +828,26 @@
   const openImport = () => {
     showImport = true;
     showExport = false;
+    showTemplates = false;
     importJson = '';
+  };
+
+  const openTemplates = () => {
+    showTemplates = true;
+    showImport = false;
+    showExport = false;
+  };
+
+  const applyTemplate = (templateId: string) => {
+    const template = STRATEGY_TEMPLATES.find((t) => t.id === templateId);
+    if (!template) return;
+    try {
+      applyImportedPayload(template.payload);
+      showTemplates = false;
+      toast.success(`Loaded template: ${template.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load template');
+    }
   };
 
   const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -1193,6 +1214,7 @@
   </div>
 
   <div class="flex items-center gap-2">
+    <Button variant="outline" onclick={openTemplates}>Templates</Button>
     <Button variant="outline" onclick={saveDraft} disabled={nodes.length === 0}>
       Save Draft
     </Button>
@@ -1275,6 +1297,46 @@
             </Button>
           </div>
         {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showTemplates}
+  <div
+    class="fixed inset-0 z-50 bg-black/40"
+    role="dialog"
+    aria-modal="true"
+    onpointerdown={(e) => { if (e.currentTarget === e.target) showTemplates = false; }}
+  >
+    <div class="mx-auto mt-24 w-[min(640px,calc(100vw-2rem))] rounded-lg border bg-background shadow-lg">
+      <div class="flex items-center justify-between border-b px-4 py-3">
+        <div class="font-semibold">Strategy Templates</div>
+        <button
+          class="rounded-md px-2 py-1 text-sm hover:bg-accent"
+          type="button"
+          onclick={() => showTemplates = false}
+        >
+          Close
+        </button>
+      </div>
+      <div class="p-4 space-y-3">
+        {#if nodes.length > 0}
+          <div class="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-muted-foreground">
+            Loading a template will replace the current canvas. Export or save first if you want to keep it.
+          </div>
+        {/if}
+        <ul class="space-y-2">
+          {#each STRATEGY_TEMPLATES as t (t.id)}
+            <li class="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+              <div class="min-w-0">
+                <div class="font-medium">{t.name}</div>
+                <div class="text-xs text-muted-foreground">{t.description}</div>
+              </div>
+              <Button size="sm" onclick={() => applyTemplate(t.id)}>Use</Button>
+            </li>
+          {/each}
+        </ul>
       </div>
     </div>
   </div>
@@ -1513,11 +1575,25 @@
         </svg>
 
         {#if nodes.length === 0}
-          <div class="absolute inset-0 grid place-items-center">
-            <div class="text-center space-y-2">
-              <div class="text-sm font-medium">Drop your first block</div>
-              <div class="text-xs text-muted-foreground">
-                Start with “On Bar”, then add indicators and actions.
+          <div class="pointer-events-none absolute inset-0 grid place-items-center p-6">
+            <div class="pointer-events-auto w-full max-w-md space-y-3 text-center">
+              <div class="space-y-1">
+                <div class="text-sm font-medium">Drop your first block</div>
+                <div class="text-xs text-muted-foreground">
+                  Drag from the palette or start from a template.
+                </div>
+              </div>
+              <div class="grid gap-2">
+                {#each STRATEGY_TEMPLATES as t (t.id)}
+                  <button
+                    type="button"
+                    class="rounded-md border bg-background p-3 text-left text-xs transition-colors hover:bg-accent"
+                    onclick={() => applyTemplate(t.id)}
+                  >
+                    <div class="text-sm font-medium">{t.name}</div>
+                    <div class="mt-0.5 text-muted-foreground">{t.description}</div>
+                  </button>
+                {/each}
               </div>
             </div>
           </div>
