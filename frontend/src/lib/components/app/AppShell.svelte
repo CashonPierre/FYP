@@ -11,8 +11,8 @@
   const nav: NavItem[] = [
     { label: 'New Backtest', href: '/app/backtests/new' },
     { label: 'Backtest History', href: '/app/backtests' },
-    { label: 'Strategies', href: '/app/strategies', disabled: true },
-    { label: 'Settings', href: '/app/settings', disabled: true },
+    { label: 'Strategies', href: '/app/strategies' },
+    { label: 'Settings', href: '/app/settings' },
   ];
 
   let { children } = $props();
