@@ -139,6 +139,52 @@
   let equity = $state<EquityPoint[]>([]);
   let trades = $state<TradeMarker[]>([]);
 
+  const csvEscape = (value: unknown): string => {
+    const s = value == null ? '' : String(value);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const downloadCsv = (filename: string, rows: (string | number | null | undefined)[][]) => {
+    const body = rows.map((row) => row.map(csvEscape).join(',')).join('\n');
+    const blob = new Blob([body + '\n'], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportTradesCsv = () => {
+    if (trades.length === 0) {
+      toast.error('No trades to export');
+      return;
+    }
+    const header = ['time', 'side', 'price', 'quantity'];
+    const apiTrades = apiResults?.series.trades ?? [];
+    const rows: (string | number | null | undefined)[][] = [header];
+    for (let i = 0; i < trades.length; i++) {
+      const t = trades[i];
+      const detail = apiTrades[i];
+      rows.push([t.time, t.side, t.price, detail?.quantity ?? t.quantity ?? '']);
+    }
+    downloadCsv(`trades_${runId}.csv`, rows);
+    toast.success('Trades exported');
+  };
+
+  const exportEquityCsv = () => {
+    if (equity.length === 0) {
+      toast.error('No equity data to export');
+      return;
+    }
+    const rows: (string | number | null | undefined)[][] = [['time', 'equity']];
+    for (const p of equity) rows.push([p.time, p.equity]);
+    downloadCsv(`equity_${runId}.csv`, rows);
+    toast.success('Equity curve exported');
+  };
+
   onMount(() => {
     // Legacy mock runs (id starts with "mock_")
     if (runId.startsWith('mock_')) {
@@ -304,7 +350,21 @@
     <h1 class="text-2xl font-bold tracking-tight">Backtest Results</h1>
     <p class="text-sm text-muted-foreground">Run id: {runId}</p>
   </div>
-  <div class="flex items-center gap-2">
+  <div class="flex flex-wrap items-center gap-2">
+    <Button
+      variant="outline"
+      onclick={exportTradesCsv}
+      disabled={status !== 'completed' || trades.length === 0}
+    >
+      Export Trades CSV
+    </Button>
+    <Button
+      variant="outline"
+      onclick={exportEquityCsv}
+      disabled={status !== 'completed' || equity.length === 0}
+    >
+      Export Equity CSV
+    </Button>
     <Button variant="outline" onclick={() => goto('/app/backtests/new')}>
       New Backtest
     </Button>
