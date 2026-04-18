@@ -1,14 +1,22 @@
 FROM python:3.12-slim
 
+# git + ca-certificates needed to clone the trading_engine submodule below.
+# Railway doesn't init git submodules during build, so the repo's trading_engine/
+# directory arrives empty in the build context — we clone it ourselves at a
+# pinned SHA. Bump TRADING_ENGINE_SHA when pulling submodule updates.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install uv from the official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /repo
 
-# Copy trading engine submodule and backend source.
-# Layout mirrors local dev: /repo/trading_engine and /repo/backend
-# so that the relative ENGINE_PATH resolution in backtest.py keeps working.
-COPY trading_engine/ ./trading_engine/
+ARG TRADING_ENGINE_SHA=9ce27aa67925129a6aba1b610208abd819eb50d3
+RUN git clone https://github.com/Quant-Backtester/trading_engine.git ./trading_engine \
+    && git -C ./trading_engine checkout ${TRADING_ENGINE_SHA}
+
 COPY backend/ ./backend/
 
 # Install Python dependencies (locked)
