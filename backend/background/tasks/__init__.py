@@ -7,3 +7,4 @@ from .cross_sectional import run_universe_backtest_task as run_universe_backtest
 # them because there's no `tasks.py` submodule in this package).
 from . import market_refresh as market_refresh  # noqa: F401
 from . import fundamentals_refresh as fundamentals_refresh  # noqa: F401
+from . import fundamentals_refresh_fmp as fundamentals_refresh_fmp  # noqa: F401

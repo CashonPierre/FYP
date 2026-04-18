@@ -27,10 +27,15 @@ class Settings(BaseSettings):
     database_host: str = Field(default="localhost")
     database_port: int = Field(default=5432)
     database_driver: str = Field(default="postgresql+psycopg2")
+    # Managed services (Timescale Cloud, Railway, etc.) expose a single
+    # DATABASE_URL. When set, it wins over the six individual components.
+    database_url_override: str = Field(default="", validation_alias="DATABASE_URL")
 
     @computed_field
     @property
     def database_url(self) -> str:
+        if self.database_url_override:
+            return self.database_url_override
         return (
             f"{self.database_driver}://"
             f"{self.database_username}:"
@@ -66,6 +71,13 @@ class Settings(BaseSettings):
     # Frontend origin — used to build email links (e.g. password reset URL).
     # Override via FRONTEND_URL env var in production.
     frontend_url: str = Field(default="http://localhost:5173")
+
+    # Fundamentals (Financial Modeling Prep)
+    # `fundamentals_source` chooses which fetcher CLI/Celery tasks route to.
+    # Default "fmp" — yfinance is kept for dev/smoke tests only; Yahoo exposes
+    # ~5 recent quarters, insufficient for any real backtest window.
+    fmp_api_key: str = Field(default="")
+    fundamentals_source: str = Field(default="fmp")
 
     # email
     resend_api_key: str = Field(default="")
