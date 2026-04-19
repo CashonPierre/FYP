@@ -84,6 +84,17 @@
       ],
     },
     {
+      id: 'sec-fundamentals',
+      title: 'Fundamental Indicators',
+      blurb: 'Company fundamentals sourced from quarterly filings (point-in-time, with a 45-day reporting lag to avoid look-ahead bias). Emit a single number per bar, reading the latest filing available as of that bar.',
+      nodes: [
+        { type: 'PE', title: 'P/E Ratio', oneLine: 'Close price ÷ TTM EPS.', inputs: '—', outputs: 'value (number)', detail: 'None when TTM EPS ≤ 0. Pair with IfBelow + Constant to buy cheap stocks (e.g. PE < 15).' },
+        { type: 'EPS', title: 'EPS (TTM)', oneLine: 'Rolling 4-quarter sum of diluted EPS.', inputs: '—', outputs: 'value (number)', detail: 'Raw earnings level, not a ratio. Use directly in comparisons or as the numerator of derived metrics.' },
+        { type: 'ROE', title: 'ROE', oneLine: 'Return on equity from the latest quarterly filing.', inputs: '—', outputs: 'value (number)', detail: 'Stored at ingest, not recomputed per bar. Good for quality screens (e.g. ROE > 0.15).' },
+        { type: 'DividendYield', title: 'Dividend Yield', oneLine: 'TTM dividend per share ÷ close price, as a percentage.', inputs: '—', outputs: 'value (number)', detail: 'None when no recent dividend is on file. Pair with IfAbove + Constant for a high-yield screen.' },
+      ],
+    },
+    {
       id: 'sec-conditions',
       title: 'Conditions',
       blurb: 'Turn numbers into events. Each condition takes two numbers (A, B) plus an event gate, and emits true/false events.',
@@ -141,6 +152,7 @@
         { type: 'Reversal',  title: 'Reversal',  oneLine: 'Negated short-term return — buy losers.', inputs: '—', outputs: 'score', params: 'period', detail: '1-month reversal is a well-known cross-sectional anomaly.' },
         { type: 'LowVol',    title: 'Low Vol',   oneLine: 'Negated realized volatility — buy quiet names.', inputs: '—', outputs: 'score', params: 'period', detail: 'Low-volatility factor — empirically outperforms on risk-adjusted basis.' },
         { type: 'Liquidity', title: 'Liquidity', oneLine: 'Average dollar volume — buy liquid names.', inputs: '—', outputs: 'score', params: 'period', detail: 'Demo factor — real strategies usually negate liquidity (small, illiquid names earn more).' },
+        { type: 'Value',     title: 'Value',     oneLine: 'Earnings yield (TTM EPS / price) — buy cheap names.', inputs: '—', outputs: 'score', detail: 'Uses earnings yield instead of 1/PE so stocks with negative earnings rank lowest (correctly) rather than blowing up to ±∞.' },
         { type: 'Rank',      title: 'Rank',      oneLine: 'Long top decile / short bottom decile of the factor score.', inputs: 'score', outputs: '—', params: 'top_pct, bottom_pct, rebalance_days, mode (long_only | long_short)', detail: 'Rebalances on a fixed cadence. long_short is dollar-neutral; long_only just holds winners.' },
       ],
     },

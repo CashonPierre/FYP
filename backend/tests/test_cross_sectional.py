@@ -258,3 +258,103 @@ def test_run_cross_sectional_rejects_too_few_symbols():
       initial_capital=10_000.0,
       ohlc_fetcher=_make_fetcher(data),
     )
+
+
+# ---------------------------------------------------------------------------
+# Value factor (fundamentals-backed)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _FundRow:
+  period_end: datetime
+  available_from: datetime
+  diluted_eps: float | None
+
+
+def test_value_factor_ranks_high_eps_yield_first():
+  from background.tasks.cross_sectional import _value
+
+  # A: $100 price, $10 EPS → earnings yield 0.10
+  # B: $100 price, $2  EPS → earnings yield 0.02
+  n = 10
+  idx = pd.date_range("2024-01-01", periods=n)
+  close = pd.DataFrame({"A": [100.0] * n, "B": [100.0] * n}, index=idx)
+  ttm_eps = pd.DataFrame({"A": [10.0] * n, "B": [2.0] * n}, index=idx)
+  scores = _value(close, ttm_eps)
+  last = scores.iloc[-1]
+  assert last["A"] > last["B"]
+
+
+def test_run_cross_sectional_value_long_only():
+  start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+  n = 40
+  data = {
+    "CHEAP": _make_bars(start, [100.0] * n),  # high EPS yield
+    "MID":   _make_bars(start, [100.0] * n),  # medium EPS yield
+    "RICH":  _make_bars(start, [100.0] * n),  # low EPS yield
+  }
+
+  # Quarterly EPS filed Dec 15 2023 (available Jan 29 2024 after 45d lag)
+  eps_map = {"CHEAP": 10.0, "MID": 4.0, "RICH": 1.0}
+  def fundamentals_fetcher(sym: str):
+    period_end = datetime(2023, 12, 31, tzinfo=timezone.utc)
+    available_from = period_end + timedelta(days=15)  # inside the bar window
+    return [_FundRow(period_end=period_end, available_from=available_from,
+                     diluted_eps=eps_map[sym])]
+
+  g = {
+    "nodes": [
+      {"id": "f1", "type": "Value", "data": {"params": {}}},
+      {"id": "r1", "type": "Rank",
+       "data": {"params": {"top_pct": 0.34, "bottom_pct": 0.34,
+                           "rebalance_days": 10, "mode": "long_only"}}},
+    ],
+    "edges": [
+      {"id": "e1", "source": "f1", "sourceHandle": "out",
+       "target": "r1", "targetHandle": "in"},
+    ],
+  }
+
+  result = run_cross_sectional(
+    symbols=["CHEAP", "MID", "RICH"],
+    start_date=None, end_date=None,
+    timeframe="1D",
+    graph=g,
+    initial_capital=10_000.0,
+    ohlc_fetcher=_make_fetcher(data),
+    fundamentals_fetcher=fundamentals_fetcher,
+  )
+  assert result["factor_label"] == "Value (earnings yield)"
+  assert len(result["nav_series"]) == n
+  # Prices are flat so NAV should stay at ~10,000 regardless of ranking
+  assert abs(result["metrics"]["final_nav"] - 10_000.0) < 1e-6
+
+
+def test_run_cross_sectional_value_requires_fundamentals_fetcher():
+  start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+  data = {
+    "A": _make_bars(start, [100.0] * 20),
+    "B": _make_bars(start, [100.0] * 20),
+  }
+  g = {
+    "nodes": [
+      {"id": "f1", "type": "Value", "data": {"params": {}}},
+      {"id": "r1", "type": "Rank",
+       "data": {"params": {"top_pct": 0.5, "bottom_pct": 0.5,
+                           "rebalance_days": 5, "mode": "long_only"}}},
+    ],
+    "edges": [
+      {"id": "e1", "source": "f1", "sourceHandle": "out",
+       "target": "r1", "targetHandle": "in"},
+    ],
+  }
+  with pytest.raises(ValueError, match="fundamentals_fetcher"):
+    run_cross_sectional(
+      symbols=["A", "B"],
+      start_date=None, end_date=None,
+      timeframe="1D",
+      graph=g,
+      initial_capital=10_000.0,
+      ohlc_fetcher=_make_fetcher(data),
+      fundamentals_fetcher=None,
+    )

@@ -571,7 +571,7 @@ const obvBreakout: TemplatePayload = {
 // and which Rank parameters they use.
 
 const buildUniverseTemplate = (
-  factorType: 'Momentum' | 'Reversal' | 'LowVol' | 'Liquidity',
+  factorType: 'Momentum' | 'Reversal' | 'LowVol' | 'Liquidity' | 'Value',
   factorParams: Record<string, number | string>,
   factorLabel: string,
   rankParams: { top_pct: number; bottom_pct: number; rebalance_days: number; mode: 'long_only' | 'long_short' },
@@ -635,6 +635,73 @@ const universeLiquidity = buildUniverseTemplate(
   { top_pct: 0.3, bottom_pct: 0.3, rebalance_days: 21, mode: 'long_only' },
   'Rank top 30% · monthly',
 );
+
+// Value factor — earnings yield (TTM EPS / price). Long cheapest quintile,
+// quarterly rebalance.
+const universeValue = buildUniverseTemplate(
+  'Value',
+  {},
+  'Value (E/P)',
+  { top_pct: 0.2, bottom_pct: 0.2, rebalance_days: 63, mode: 'long_only' },
+  'Rank top 20% · quarterly',
+);
+
+// Fundamental P/E screen — regular-mode template. Buy when the PE ratio
+// drops into value territory (< 15) and sell once it re-rates above 25.
+const peScreen: TemplatePayload = {
+  version: 0,
+  settings: baseSettings,
+  graph: {
+    nodes: [
+      { id: 'trig', type: 'OnBar', x: 80, y: 80, label: 'On Bar', params: { timeframe: '1D' } },
+      { id: 'pe',   type: 'PE',    x: 80, y: 200, label: 'P/E', params: {} },
+      { id: 'low',  type: 'Constant', x: 80, y: 320, label: 'PE < 15', params: { value: 15 } },
+      { id: 'high', type: 'Constant', x: 80, y: 440, label: 'PE > 25', params: { value: 25 } },
+      { id: 'ifBuy',  type: 'IfBelow', x: 420, y: 160, label: 'PE < 15?', params: {} },
+      { id: 'ifSell', type: 'IfAbove', x: 420, y: 360, label: 'PE > 25?', params: {} },
+      { id: 'buy',  type: 'Buy',  x: 760, y: 160, label: 'Buy 10% equity', params: { size_type: 'pct_equity', amount: 10 } },
+      { id: 'sell', type: 'Sell', x: 760, y: 360, label: 'Sell all', params: { size_type: 'all' } },
+    ],
+    edges: [
+      { id: 'e1', source: 'trig', target: 'ifBuy',  sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e2', source: 'pe',   target: 'ifBuy',  sourceHandle: 'out', targetHandle: 'a' },
+      { id: 'e3', source: 'low',  target: 'ifBuy',  sourceHandle: 'out', targetHandle: 'b' },
+      { id: 'e4', source: 'ifBuy', target: 'buy',   sourceHandle: 'true', targetHandle: 'in' },
+      { id: 'e5', source: 'trig', target: 'ifSell', sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e6', source: 'pe',   target: 'ifSell', sourceHandle: 'out', targetHandle: 'a' },
+      { id: 'e7', source: 'high', target: 'ifSell', sourceHandle: 'out', targetHandle: 'b' },
+      { id: 'e8', source: 'ifSell', target: 'sell', sourceHandle: 'true', targetHandle: 'in' },
+    ],
+  },
+};
+
+// Dividend yield screen — buy high-yielders, sell when yield compresses.
+const dividendScreen: TemplatePayload = {
+  version: 0,
+  settings: baseSettings,
+  graph: {
+    nodes: [
+      { id: 'trig', type: 'OnBar', x: 80, y: 80, label: 'On Bar', params: { timeframe: '1D' } },
+      { id: 'dy',   type: 'DividendYield', x: 80, y: 200, label: 'Div Yield', params: {} },
+      { id: 'high', type: 'Constant', x: 80, y: 320, label: 'Yield > 4%', params: { value: 4 } },
+      { id: 'low',  type: 'Constant', x: 80, y: 440, label: 'Yield < 2%', params: { value: 2 } },
+      { id: 'ifBuy',  type: 'IfAbove', x: 420, y: 160, label: 'Yield > 4?', params: {} },
+      { id: 'ifSell', type: 'IfBelow', x: 420, y: 360, label: 'Yield < 2?', params: {} },
+      { id: 'buy',  type: 'Buy',  x: 760, y: 160, label: 'Buy 10% equity', params: { size_type: 'pct_equity', amount: 10 } },
+      { id: 'sell', type: 'Sell', x: 760, y: 360, label: 'Sell all', params: { size_type: 'all' } },
+    ],
+    edges: [
+      { id: 'e1', source: 'trig', target: 'ifBuy',  sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e2', source: 'dy',   target: 'ifBuy',  sourceHandle: 'out', targetHandle: 'a' },
+      { id: 'e3', source: 'high', target: 'ifBuy',  sourceHandle: 'out', targetHandle: 'b' },
+      { id: 'e4', source: 'ifBuy', target: 'buy',   sourceHandle: 'true', targetHandle: 'in' },
+      { id: 'e5', source: 'trig', target: 'ifSell', sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e6', source: 'dy',   target: 'ifSell', sourceHandle: 'out', targetHandle: 'a' },
+      { id: 'e7', source: 'low',  target: 'ifSell', sourceHandle: 'out', targetHandle: 'b' },
+      { id: 'e8', source: 'ifSell', target: 'sell', sourceHandle: 'true', targetHandle: 'in' },
+    ],
+  },
+};
 
 // Template mode defaults — single/multi/dataset share the regular palette.
 const REGULAR_MODES: TemplateMode[] = ['single', 'multi', 'dataset'];
@@ -781,5 +848,26 @@ export const STRATEGY_TEMPLATES: TemplateDefinition[] = [
     description: 'Long the top 30% most-liquid names by mean dollar volume. A sanity baseline for universe backtests.',
     modes: UNIVERSE_MODES,
     payload: universeLiquidity,
+  },
+  {
+    id: 'universe-value',
+    name: 'Value (Earnings Yield)',
+    description: 'Long the cheapest 20% by TTM earnings yield (EPS / price). Quarterly rebalance. Requires fundamentals data.',
+    modes: UNIVERSE_MODES,
+    payload: universeValue,
+  },
+  {
+    id: 'pe-screen',
+    name: 'P/E Value Screen',
+    description: 'Buy when P/E drops below 15 (value territory); exit when it re-rates above 25. Single-stock fundamentals demo.',
+    modes: REGULAR_MODES,
+    payload: peScreen,
+  },
+  {
+    id: 'dividend-screen',
+    name: 'High-Yield Dividend Screen',
+    description: 'Buy when TTM dividend yield is above 4%; sell once it compresses below 2%. Demonstrates the DividendYield node.',
+    modes: REGULAR_MODES,
+    payload: dividendScreen,
   },
 ];

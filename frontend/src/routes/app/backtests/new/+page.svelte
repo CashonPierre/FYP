@@ -44,11 +44,17 @@
     | 'Constant'
     | 'Buy'
     | 'Sell'
+    // Fundamental indicators (require FundamentalSnapshot data)
+    | 'PE'
+    | 'EPS'
+    | 'ROE'
+    | 'DividendYield'
     // Universe-mode factor nodes
     | 'Momentum'
     | 'Reversal'
     | 'LowVol'
     | 'Liquidity'
+    | 'Value'
     | 'Rank';
 
   type BuilderNode = {
@@ -104,6 +110,11 @@
     { type: 'MFI', title: 'MFI', hint: 'Money Flow Index (volume-weighted RSI)' },
     { type: 'OBV', title: 'OBV', hint: 'On-Balance Volume (cumulative)' },
     { type: 'KST', title: 'KST', hint: 'Know Sure Thing — long-term momentum' },
+    // Fundamentals
+    { type: 'PE', title: 'P/E Ratio', hint: 'Price ÷ TTM EPS (from quarterly filings)' },
+    { type: 'EPS', title: 'EPS (TTM)', hint: 'Trailing twelve-month diluted EPS' },
+    { type: 'ROE', title: 'ROE', hint: 'Return on equity (latest filing)' },
+    { type: 'DividendYield', title: 'Dividend Yield', hint: 'TTM dividend ÷ price (%)' },
     // Conditions
     { type: 'IfAbove', title: 'If A > B', hint: 'True while A is above B' },
     { type: 'IfBelow', title: 'If A < B', hint: 'True while A is below B' },
@@ -128,6 +139,7 @@
     { type: 'Reversal',  title: 'Reversal',  hint: 'Inverse short-term return (buy losers)' },
     { type: 'LowVol',    title: 'Low Vol',   hint: 'Negated realized volatility' },
     { type: 'Liquidity', title: 'Liquidity', hint: 'Average dollar volume' },
+    { type: 'Value',     title: 'Value',     hint: 'Earnings yield (TTM EPS / price)' },
     { type: 'Rank',      title: 'Rank',      hint: 'Long top decile / short bottom decile' },
   ];
 
@@ -372,10 +384,20 @@
           inputs: [{ handle: 'in', label: 'event', type: 'event', y: NODE_DEFAULT_PORT_Y }],
           outputs: [],
         };
+      case 'PE':
+      case 'EPS':
+      case 'ROE':
+      case 'DividendYield':
+        // Fundamental indicators — no wirable input, a single numeric output
+        return {
+          inputs: [],
+          outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
+        };
       case 'Momentum':
       case 'Reversal':
       case 'LowVol':
       case 'Liquidity':
+      case 'Value':
         // Factor nodes — compute a cross-sectional score from OHLCV, no wirable input
         return {
           inputs: [],
@@ -486,6 +508,13 @@
         return { period: 63 };
       case 'Liquidity':
         return { period: 60 };
+      case 'Value':
+        return {};
+      case 'PE':
+      case 'EPS':
+      case 'ROE':
+      case 'DividendYield':
+        return {};
       case 'Rank':
         return { top_pct: 0.2, bottom_pct: 0.2, rebalance_days: 21, mode: 'long_only' };
       case 'Buy':
@@ -651,7 +680,7 @@
     edgeId?: string;
   };
 
-  const FACTOR_TYPES: readonly NodeType[] = ['Momentum', 'Reversal', 'LowVol', 'Liquidity'];
+  const FACTOR_TYPES: readonly NodeType[] = ['Momentum', 'Reversal', 'LowVol', 'Liquidity', 'Value'];
 
   const validateUniverse = (
     currentNodes: BuilderNode[],
@@ -2853,6 +2882,25 @@
           <p class="text-xs text-muted-foreground">
             Score = close[t−skip] / close[t−lookback] − 1. Classic academic momentum excludes the
             most recent month (skip=21) to avoid short-term reversal.
+          </p>
+        {/if}
+
+        {#if selected.type === 'Value'}
+          <p class="text-xs text-muted-foreground">
+            Score = TTM EPS ÷ price (earnings yield). Higher = cheaper. Negative earnings rank lowest.
+            Requires fundamentals data to be refreshed for the universe.
+          </p>
+        {/if}
+
+        {#if selected.type === 'PE' || selected.type === 'EPS' || selected.type === 'ROE' || selected.type === 'DividendYield'}
+          <p class="text-xs text-muted-foreground">
+            {selected.type === 'PE'
+              ? 'Price ÷ TTM EPS, computed at each bar from the latest fundamentals snapshot. None if EPS ≤ 0.'
+              : selected.type === 'EPS'
+                ? 'Rolling sum of the last four quarterly diluted EPS values.'
+                : selected.type === 'ROE'
+                  ? 'Net income ÷ shareholder equity, from the latest quarterly filing.'
+                  : 'TTM dividend per share ÷ current close price, expressed as a percentage.'}
           </p>
         {/if}
 

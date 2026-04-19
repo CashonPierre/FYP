@@ -1489,3 +1489,95 @@ class TestRiskManagementExits:
     # Drop to 113 → below 114, exit
     assert gs.on_event(_event(113.0)).__class__.__name__ == "CloseSignal"
     assert gs._trailing_max is None
+
+
+class TestFundamentalIndicators:
+  """PE / EPS / ROE / DividendYield read from a fundamentals_df parallel to ohlcv_df."""
+
+  def _fund_df(self, rows: list[tuple]):
+    """rows: list of (ttm_eps, ttm_div, roe) — one per bar, aligned to event order."""
+    return pd.DataFrame(
+      [{"ttm_eps": r[0], "ttm_div_per_share": r[1], "roe": r[2],
+        "profit_margin": None, "debt_to_equity": None} for r in rows]
+    )
+
+  def test_eps_passes_through_ttm_value(self):
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("eps", "EPS"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "buy")],
+    )
+    fund = self._fund_df([(5.0, None, None), (6.0, None, None)])
+    gs = GraphStrategy(g, fundamentals_df=fund)
+    # EPS node evaluated each bar — no crash, OnBar still routes to Buy.
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    assert gs.on_event(_event(101.0)).__class__.__name__ == "AddSignal"
+
+  def test_pe_computes_from_close_over_eps(self):
+    # Graph: OnBar → IfBelow(a=PE, b=Constant(20)) → Buy
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("pe", "PE"),
+       _node("k", "Constant", {"value": 20}),
+       _node("if", "IfBelow"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if"),
+       _edge("pe", "if", src_h="out", tgt_h="a"),
+       _edge("k",  "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true", tgt_h="in")],
+    )
+    # Bar1: price=100, EPS=10 → PE=10 → 10 < 20 → Buy
+    # Bar2: price=100, EPS=4  → PE=25 → 25 < 20 → No buy
+    fund = self._fund_df([(10.0, None, None), (4.0, None, None)])
+    gs = GraphStrategy(g, fundamentals_df=fund)
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "NullSignal"
+
+  def test_pe_negative_eps_is_none(self):
+    # With negative EPS, PE node should emit None (no signal).
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("pe", "PE"),
+       _node("k", "Constant", {"value": 20}),
+       _node("if", "IfBelow"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if"),
+       _edge("pe", "if", src_h="out", tgt_h="a"),
+       _edge("k",  "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true", tgt_h="in")],
+    )
+    fund = self._fund_df([(-2.0, None, None)])
+    gs = GraphStrategy(g, fundamentals_df=fund)
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "NullSignal"
+
+  def test_dividend_yield_expressed_as_percent(self):
+    # DY = (ttm_div / close) * 100 → 4 / 100 * 100 = 4.0
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("dy", "DividendYield"),
+       _node("k", "Constant", {"value": 3.5}),
+       _node("if", "IfAbove"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if"),
+       _edge("dy", "if", src_h="out", tgt_h="a"),
+       _edge("k",  "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true", tgt_h="in")],
+    )
+    fund = self._fund_df([(None, 4.0, None)])
+    gs = GraphStrategy(g, fundamentals_df=fund)
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+
+  def test_roe_threshold_filter(self):
+    g = _make_graph(
+      [_node("ob", "OnBar"), _node("roe", "ROE"),
+       _node("k", "Constant", {"value": 0.15}),
+       _node("if", "IfAbove"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if"),
+       _edge("roe", "if", src_h="out", tgt_h="a"),
+       _edge("k",   "if", src_h="out", tgt_h="b"),
+       _edge("if",  "buy", src_h="true", tgt_h="in")],
+    )
+    # Bar1: ROE=0.20 → 0.20 > 0.15 → Buy
+    # Bar2: ROE=0.10 → 0.10 > 0.15 → No buy
+    fund = self._fund_df([(None, None, 0.20), (None, None, 0.10)])
+    gs = GraphStrategy(g, fundamentals_df=fund)
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    assert gs.on_event(_event(101.0)).__class__.__name__ == "NullSignal"

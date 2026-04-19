@@ -2,13 +2,14 @@
 GraphStrategy — evaluates a visual strategy graph per bar.
 
 Supported nodes:
-  Triggers   : OnBar
-  Data       : Data, Constant, Volume
-  Indicators : SMA, EMA, RSI, MACD, BollingerBands, ATR, Stochastic,
-               ROC, WilliamsR, CCI, KDJ, MFI, OBV, KST
-  Conditions : IfAbove, IfBelow, IfCrossAbove, IfCrossBelow,
-               And, Or, Not, TimeWindow, Position
-  Actions    : Buy, Sell, StopLoss, TakeProfit, TrailingStop
+  Triggers    : OnBar
+  Data        : Data, Constant, Volume
+  Indicators  : SMA, EMA, RSI, MACD, BollingerBands, ATR, Stochastic,
+                ROC, WilliamsR, CCI, KDJ, MFI, OBV, KST
+  Fundamentals: PE, EPS, ROE, DividendYield
+  Conditions  : IfAbove, IfBelow, IfCrossAbove, IfCrossBelow,
+                And, Or, Not, TimeWindow, Position
+  Actions     : Buy, Sell, StopLoss, TakeProfit, TrailingStop
 
 Graph JSON format (same as builder export):
   nodes: [{id, type, data: {params: {...}}, ...}]
@@ -77,6 +78,12 @@ _INDICATOR_TYPES = frozenset({
   "KDJ", "MFI", "OBV", "KST",
 })
 
+# Fundamental node types — values sourced from a per-bar fundamentals frame
+# that's forward-filled from quarterly FundamentalSnapshot rows. PE and
+# DividendYield combine the per-bar close price with TTM EPS / TTM dividend
+# per share at strategy-evaluation time.
+_FUNDAMENTAL_TYPES = frozenset({"PE", "EPS", "ROE", "DividendYield"})
+
 
 # ---------------------------------------------------------------------------
 # GraphStrategy
@@ -103,7 +110,11 @@ class GraphStrategy:
   """
 
   def __init__(
-    self, graph: dict, ohlcv_df=None, initial_capital: float = 100000.0,
+    self,
+    graph: dict,
+    ohlcv_df=None,
+    initial_capital: float = 100000.0,
+    fundamentals_df=None,
   ) -> None:
     # initial_capital is used for Buy sizing modes that reference equity
     # ("pct_equity"). We size against initial capital rather than current
@@ -164,6 +175,15 @@ class GraphStrategy:
     self._precomputed: dict[str, dict[str, list[float | None]]] = {}
     if ohlcv_df is not None:
       self._precompute_indicators(ohlcv_df)
+
+    # Fundamentals series aligned to the bar index. Keys:
+    #   ttm_eps, ttm_div_per_share, roe, profit_margin, debt_to_equity
+    # Each is a list[float | None] with len == len(bars). Built by the
+    # caller (see backend/background/tasks/backtest.py) from quarterly
+    # FundamentalSnapshot rows; we just index by bar position.
+    self._fundamentals: dict[str, list[float | None]] = {}
+    if fundamentals_df is not None:
+      self._load_fundamentals(fundamentals_df)
 
   # ------------------------------------------------------------------
   # Topological sort (Kahn's algorithm)
@@ -421,6 +441,42 @@ class GraphStrategy:
                  len(self._precomputed), len(close))
 
   # ------------------------------------------------------------------
+  # Fundamentals loading (forward-filled quarterly snapshots)
+  # ------------------------------------------------------------------
+
+  def _load_fundamentals(self, df) -> None:
+    """
+    Store per-bar fundamentals series. Caller is expected to pass a DataFrame
+    whose row order matches the ohlcv_df bar order (same length, same dates).
+
+    Expected columns (any subset):
+      ttm_eps, ttm_div_per_share, roe, profit_margin, debt_to_equity
+
+    Missing values (pre-first-report, gap between reports) should already be
+    NaN or None in the input; we translate to None.
+    """
+    def _to_list(series) -> list[float | None]:
+      out: list[float | None] = []
+      for v in series:
+        if v is None:
+          out.append(None)
+        elif isinstance(v, float) and math.isnan(v):
+          out.append(None)
+        else:
+          out.append(float(v))
+      return out
+
+    for col in ("ttm_eps", "ttm_div_per_share", "roe", "profit_margin", "debt_to_equity"):
+      if col in df.columns:
+        self._fundamentals[col] = _to_list(df[col])
+
+  def _fund_val(self, key: str) -> float | None:
+    series = self._fundamentals.get(key)
+    if series is None:
+      return None
+    return series[self._bar_idx] if self._bar_idx < len(series) else None
+
+  # ------------------------------------------------------------------
   # Per-bar evaluation
   # ------------------------------------------------------------------
 
@@ -570,6 +626,32 @@ class GraphStrategy:
           }
         else:
           outputs[nid] = {"kst": None, "signal": None}
+
+      # ── PE (price / TTM EPS) ───────────────────────────────────────
+      elif ntype == "PE":
+        ttm_eps = self._fund_val("ttm_eps")
+        if ttm_eps is None or ttm_eps <= 0:
+          outputs[nid] = {"out": None}
+        else:
+          close = float(bar.Close if bar.Close is not None else bar.price)
+          outputs[nid] = {"out": close / ttm_eps}
+
+      # ── EPS (TTM diluted EPS) ──────────────────────────────────────
+      elif ntype == "EPS":
+        outputs[nid] = {"out": self._fund_val("ttm_eps")}
+
+      # ── ROE (precomputed at ingest) ────────────────────────────────
+      elif ntype == "ROE":
+        outputs[nid] = {"out": self._fund_val("roe")}
+
+      # ── DividendYield (TTM dividends per share / close × 100) ──────
+      elif ntype == "DividendYield":
+        ttm_div = self._fund_val("ttm_div_per_share")
+        close = float(bar.Close if bar.Close is not None else bar.price)
+        if ttm_div is None or close <= 0:
+          outputs[nid] = {"out": None}
+        else:
+          outputs[nid] = {"out": (ttm_div / close) * 100.0}
 
       # ── IfAbove ────────────────────────────────────────────────────
       elif ntype == "IfAbove":

@@ -143,13 +143,96 @@ class _BarRow:
     self.volume = volume
 
 
-def _strategy_from_graph(graph: dict, ohlcv_df=None, initial_capital: float = 100000.0):
+_FUNDAMENTAL_NODE_TYPES = frozenset({"PE", "EPS", "ROE", "DividendYield"})
+
+
+def _graph_needs_fundamentals(graph: dict) -> bool:
+  return any(
+    (n.get("type") or "") in _FUNDAMENTAL_NODE_TYPES
+    for n in graph.get("nodes", [])
+  )
+
+
+def _build_fundamentals_df(session, symbol: str, bar_dates):
+  """
+  Load FundamentalSnapshot rows for `symbol` and produce a DataFrame aligned
+  to `bar_dates` (one row per bar). Uses `available_from` as the asof date
+  (point-in-time: a row is only visible on/after its filing date) and
+  forward-fills.
+
+  Columns produced (any may be NaN if upstream was NULL):
+    ttm_eps, ttm_div_per_share, roe, profit_margin, debt_to_equity
+
+  TTM values sum the trailing 4 quarterly rows at each `available_from`.
+  """
+  import pandas as pd
+  from database.models import FundamentalSnapshot
+
+  rows = list(session.execute(
+    select(FundamentalSnapshot)
+    .where(FundamentalSnapshot.symbol == symbol)
+    .order_by(FundamentalSnapshot.period_end)
+  ).scalars().all())
+
+  if not rows:
+    # Return an empty frame aligned to bars so the caller can still detect
+    # presence via len(df) / df.empty without crashing.
+    return pd.DataFrame(index=pd.DatetimeIndex(bar_dates))
+
+  # Build a quarterly frame keyed by available_from so point-in-time
+  # alignment falls out of a plain forward-fill on the bar index.
+  quarterly = pd.DataFrame([
+    {
+      "available_from": r.available_from,
+      "diluted_eps":    r.diluted_eps,
+      "div_per_share":  r.dividend_per_share,
+      "roe":            r.roe,
+      "profit_margin":  r.profit_margin,
+      "debt_to_equity": r.debt_to_equity,
+    }
+    for r in rows
+  ]).set_index("available_from").sort_index()
+
+  # TTM = trailing 4 rows (including current) for flow metrics (EPS, div).
+  # Stock metrics (ROE, profit_margin, debt/equity) use the most recent
+  # quarterly value as-is — no need to sum.
+  quarterly["ttm_eps"] = quarterly["diluted_eps"].rolling(window=4, min_periods=1).sum()
+  quarterly["ttm_div_per_share"] = quarterly["div_per_share"].rolling(window=4, min_periods=1).sum()
+
+  # Bar-aligned frame, forward-filled from the quarterly snapshots.
+  bar_idx = pd.DatetimeIndex(bar_dates)
+  q = quarterly[["ttm_eps", "ttm_div_per_share", "roe", "profit_margin", "debt_to_equity"]]
+
+  # Reindex onto the union of bar dates + available_from dates, forward-fill,
+  # then reindex down to just the bar dates. This keeps an asof-join look
+  # without pulling the pandas >= 1.3 merge_asof path.
+  if q.index.tz is not None:
+    bar_idx_tz = bar_idx.tz_localize(q.index.tz) if bar_idx.tz is None else bar_idx.tz_convert(q.index.tz)
+  else:
+    bar_idx_tz = bar_idx.tz_localize(None) if bar_idx.tz is not None else bar_idx
+
+  union = q.index.union(bar_idx_tz)
+  aligned = q.reindex(union).ffill().reindex(bar_idx_tz)
+  aligned.index = bar_idx
+  return aligned
+
+
+def _strategy_from_graph(
+  graph: dict,
+  ohlcv_df=None,
+  initial_capital: float = 100000.0,
+  fundamentals_df=None,
+):
   """
   Parse a builder graph JSON and return a GraphStrategy instance.
 
   When ohlcv_df is provided (a pandas DataFrame with open/high/low/close/volume
   columns), indicator series are precomputed with pandas_ta upfront so that
   on_event performs O(1) lookups instead of incremental rolling calculations.
+
+  When fundamentals_df is provided (same row count as ohlcv_df, columns
+  ttm_eps/ttm_div_per_share/roe/profit_margin/debt_to_equity), the PE / EPS /
+  ROE / DividendYield nodes read from it during evaluation.
 
   `initial_capital` is forwarded to GraphStrategy so Buy nodes in "pct_equity"
   sizing mode can resolve the percent against a real dollar basis.
@@ -165,9 +248,17 @@ def _strategy_from_graph(graph: dict, ohlcv_df=None, initial_capital: float = 10
     logger.warning("graph parser: empty graph, falling back to DCA default")
     return DCA(buyframe=1, buy_amount=10)
 
-  logger.info("graph parser: building GraphStrategy (%d nodes, %d edges, precompute=%s)",
-              len(nodes), len(graph.get("edges", [])), ohlcv_df is not None)
-  return GraphStrategy(graph, ohlcv_df=ohlcv_df, initial_capital=initial_capital)
+  logger.info(
+    "graph parser: building GraphStrategy (%d nodes, %d edges, precompute=%s, fundamentals=%s)",
+    len(nodes), len(graph.get("edges", [])),
+    ohlcv_df is not None, fundamentals_df is not None,
+  )
+  return GraphStrategy(
+    graph,
+    ohlcv_df=ohlcv_df,
+    initial_capital=initial_capital,
+    fundamentals_df=fundamentals_df,
+  )
 
 
 def _make_engine(initial_cash: float):
@@ -327,8 +418,24 @@ def run_backtest(self: Task, run_id: str) -> None:
       "volume": [b.volume or 0 for b in bars],
     })
 
+    # Load point-in-time fundamentals only when the graph references them —
+    # keeps the hot path zero-cost for typical indicator-only strategies.
+    fundamentals_df = None
+    if _graph_needs_fundamentals(graph):
+      bar_dates = [b.time for b in bars]
+      fundamentals_df = _build_fundamentals_df(session, symbol, bar_dates)
+      logger.info(
+        "fundamentals: loaded %d rows for %s (non-null ttm_eps=%d)",
+        len(fundamentals_df),
+        symbol,
+        int(fundamentals_df["ttm_eps"].notna().sum()) if "ttm_eps" in fundamentals_df.columns else 0,
+      )
+
     strategy = _strategy_from_graph(
-      graph, ohlcv_df=ohlcv_df, initial_capital=initial_capital,
+      graph,
+      ohlcv_df=ohlcv_df,
+      initial_capital=initial_capital,
+      fundamentals_df=fundamentals_df,
     )
     engine.add_strategy(strategy)
 

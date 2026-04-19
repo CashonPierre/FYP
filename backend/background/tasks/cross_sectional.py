@@ -33,7 +33,7 @@ from sqlalchemy import select, and_
 from background.celery_app import celery_worker
 from configs import get_logger
 from database.make_db import SessionLocal
-from database.models import BacktestRun, EquityPoint, OhlcBar, RunMetrics
+from database.models import BacktestRun, EquityPoint, FundamentalSnapshot, OhlcBar, RunMetrics
 
 logger = get_logger()
 
@@ -67,11 +67,64 @@ def _liquidity(close: pd.DataFrame, volume: pd.DataFrame, period: int = 60) -> p
   return dv.rolling(window=period).mean()
 
 
+def _value(close: pd.DataFrame, ttm_eps: pd.DataFrame) -> pd.DataFrame:
+  """
+  Value factor = earnings yield (TTM EPS / price). Higher = cheaper (low P/E)
+  = rank higher. Cleaner than 1/PE because it handles zero or negative EPS
+  without blowing up — negative earnings simply rank lowest (correctly).
+  """
+  aligned = ttm_eps.reindex_like(close).ffill()
+  return aligned / close.replace({0: np.nan})
+
+
+def _build_ttm_eps_df(
+  fundamentals_fetcher,
+  symbols: list[str],
+  bar_index: pd.DatetimeIndex,
+) -> pd.DataFrame:
+  """
+  Build a (dates × symbols) DataFrame of TTM EPS, point-in-time using
+  available_from (period_end + 45d) so no look-ahead bias. Forward-fills
+  onto the bar_index so the most recent known value is used between
+  filings. Missing symbols are NaN columns (they'll rank last, correctly).
+  """
+  tz = bar_index.tz
+  bar_idx_naive = bar_index.tz_convert("UTC").tz_localize(None) if tz is not None else bar_index
+
+  per_symbol: dict[str, pd.Series] = {}
+  for sym in symbols:
+    rows = fundamentals_fetcher(sym)
+    if not rows:
+      per_symbol[sym] = pd.Series(dtype=float, index=bar_idx_naive)
+      continue
+    rows = sorted(rows, key=lambda r: r.period_end)
+    eps_values: list[float | None] = []
+    avail_dates: list[pd.Timestamp] = []
+    for r in rows:
+      eps = float(r.diluted_eps) if r.diluted_eps is not None else None
+      eps_values.append(eps)
+      af = r.available_from if r.available_from is not None else r.period_end
+      avail_dates.append(pd.Timestamp(af))
+
+    quarterly = pd.Series(eps_values, index=pd.DatetimeIndex(avail_dates))
+    # Normalize index tz to naive to match bar_idx_naive
+    if quarterly.index.tz is not None:
+      quarterly.index = quarterly.index.tz_convert("UTC").tz_localize(None)
+    ttm = quarterly.rolling(window=4, min_periods=1).sum()
+
+    union = quarterly.index.union(bar_idx_naive).sort_values()
+    per_symbol[sym] = ttm.reindex(union).ffill().reindex(bar_idx_naive)
+
+  df = pd.DataFrame(per_symbol)
+  df.index = bar_index  # restore tz-aware index to match close
+  return df
+
+
 # ---------------------------------------------------------------------------
 # Graph parsing
 # ---------------------------------------------------------------------------
 
-_FACTOR_TYPES = frozenset({"Momentum", "Reversal", "LowVol", "Liquidity"})
+_FACTOR_TYPES = frozenset({"Momentum", "Reversal", "LowVol", "Liquidity", "Value"})
 
 
 def _node_param(node: dict, key: str, default):
@@ -224,6 +277,7 @@ def run_cross_sectional(
   graph: dict,
   initial_capital: float,
   ohlc_fetcher,
+  fundamentals_fetcher=None,
 ) -> dict:
   """
   Pure-function executor — callable from the Celery task AND from unit tests
@@ -285,6 +339,12 @@ def run_cross_sectional(
     period = int(_node_param(factor_node, "period", 60))
     scores = _liquidity(close, volume, period=period)
     factor_label = f"Liquidity({period})"
+  elif ftype == "Value":
+    if fundamentals_fetcher is None:
+      raise ValueError("Value factor requires a fundamentals_fetcher")
+    ttm_eps = _build_ttm_eps_df(fundamentals_fetcher, list(close.columns), close.index)
+    scores = _value(close, ttm_eps)
+    factor_label = "Value (earnings yield)"
   else:
     raise ValueError(f"Unsupported factor type: {ftype}")
 
@@ -380,6 +440,12 @@ def run_universe_backtest(self: Task, run_id: str) -> None:
       stmt = stmt.order_by(OhlcBar.time)
       return list(session.execute(stmt).scalars().all())
 
+    def fundamentals_fetcher(sym: str):
+      stmt = select(FundamentalSnapshot).where(
+        FundamentalSnapshot.symbol == sym
+      ).order_by(FundamentalSnapshot.period_end)
+      return list(session.execute(stmt).scalars().all())
+
     result = run_cross_sectional(
       symbols=symbols,
       start_date=start_date,
@@ -388,6 +454,7 @@ def run_universe_backtest(self: Task, run_id: str) -> None:
       graph=graph,
       initial_capital=initial_capital,
       ohlc_fetcher=ohlc_fetcher,
+      fundamentals_fetcher=fundamentals_fetcher,
     )
 
     nav_series: pd.Series = result["nav_series"]
