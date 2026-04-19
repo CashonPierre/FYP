@@ -321,6 +321,86 @@
     return ohlc.map((b) => ({ time: b.time, equity: b.close / first }));
   });
 
+  // Strategy vs. benchmark stats — Alpha / Beta / Information Ratio.
+  // All computed from the two rebased-to-1.0 NAV curves so the strategy's
+  // un-deployed cash doesn't distort the comparison. Returns null when
+  // there aren't enough matched bars (need >=2 aligned observations).
+  const benchmarkStats = $derived.by(() => {
+    const empty = { alpha: null, beta: null, informationRatio: null, trackingError: null };
+    if (equityNav.length < 2 || benchmarkNav.length < 2) return empty;
+
+    // Align strategy NAV to benchmark NAV by timestamp — an inner join so
+    // bars that only exist on one side (rare but possible near the edges)
+    // don't contaminate the regression.
+    const byTime = new Map<number, number>();
+    for (const p of benchmarkNav) byTime.set(+new Date(p.time), p.equity);
+    const aligned: Array<{ s: number; b: number }> = [];
+    for (const p of equityNav) {
+      const bVal = byTime.get(+new Date(p.time));
+      if (bVal != null) aligned.push({ s: p.equity, b: bVal });
+    }
+    if (aligned.length < 3) return empty;
+
+    // Bar-to-bar returns on each side.
+    const rs: number[] = [];
+    const rb: number[] = [];
+    for (let i = 1; i < aligned.length; i++) {
+      const prev = aligned[i - 1];
+      const curr = aligned[i];
+      if (prev.s > 0 && prev.b > 0) {
+        rs.push(curr.s / prev.s - 1);
+        rb.push(curr.b / prev.b - 1);
+      }
+    }
+    if (rs.length < 2) return empty;
+
+    const barsPerYear = 252; // daily bars; matches backend default
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    const meanS = mean(rs);
+    const meanB = mean(rb);
+
+    // Beta — covariance(strategy, benchmark) / variance(benchmark).
+    let covSB = 0;
+    let varB = 0;
+    for (let i = 0; i < rs.length; i++) {
+      covSB += (rs[i] - meanS) * (rb[i] - meanB);
+      varB += (rb[i] - meanB) ** 2;
+    }
+    covSB /= rs.length;
+    varB /= rs.length;
+    const beta = varB > 0 ? covSB / varB : null;
+
+    // Alpha — annualised CAGR difference over the matched window.
+    const firstS = aligned[0].s;
+    const lastS = aligned[aligned.length - 1].s;
+    const firstB = aligned[0].b;
+    const lastB = aligned[aligned.length - 1].b;
+    const n = rs.length;
+    let alpha: number | null = null;
+    if (firstS > 0 && lastS > 0 && firstB > 0 && lastB > 0 && n > 0) {
+      const cagrS = Math.pow(lastS / firstS, barsPerYear / n) - 1;
+      const cagrB = Math.pow(lastB / firstB, barsPerYear / n) - 1;
+      alpha = cagrS - cagrB;
+    }
+
+    // Tracking error — annualised std of the active return (strategy - benchmark).
+    const active = rs.map((v, i) => v - rb[i]);
+    const activeMean = mean(active);
+    let varActive = 0;
+    for (const r of active) varActive += (r - activeMean) ** 2;
+    varActive /= Math.max(1, active.length - 1);
+    const te = Math.sqrt(varActive) * Math.sqrt(barsPerYear);
+    const trackingError = te > 0 ? te : null;
+
+    // Information ratio — annualised alpha / tracking error.
+    const informationRatio =
+      alpha != null && trackingError != null && trackingError > 0
+        ? alpha / trackingError
+        : null;
+
+    return { alpha, beta, informationRatio, trackingError };
+  });
+
   // Cumulative P&L — equity centred at $0 so small movements aren't crushed
   // against the dollar-scale baseline of the NAV curve.
   const cumulativePnl = $derived.by<EquityPoint[]>(() => {
@@ -523,6 +603,37 @@
             <Card.Description>Win Rate</Card.Description>
             <Card.Title class="text-xl">
               {summary.winRate != null ? fmtPercent(summary.winRate) : '—'}
+            </Card.Title>
+          </Card.Header>
+        </Card.Root>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card.Root class="border">
+          <Card.Header>
+            <Card.Description>
+              Alpha (vs. Buy &amp; Hold {summary.triggerSymbol})
+            </Card.Description>
+            <Card.Title class="text-xl">
+              {benchmarkStats.alpha != null ? fmtPercent(benchmarkStats.alpha) : '—'}
+            </Card.Title>
+          </Card.Header>
+        </Card.Root>
+        <Card.Root class="border">
+          <Card.Header>
+            <Card.Description>Beta</Card.Description>
+            <Card.Title class="text-xl">
+              {benchmarkStats.beta != null ? fmtNumber3(benchmarkStats.beta) : '—'}
+            </Card.Title>
+          </Card.Header>
+        </Card.Root>
+        <Card.Root class="border">
+          <Card.Header>
+            <Card.Description>Information Ratio</Card.Description>
+            <Card.Title class="text-xl">
+              {benchmarkStats.informationRatio != null
+                ? fmtNumber3(benchmarkStats.informationRatio)
+                : '—'}
             </Card.Title>
           </Card.Header>
         </Card.Root>

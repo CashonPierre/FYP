@@ -11,9 +11,12 @@ aren't enough data points; the helper never raises.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -48,7 +51,10 @@ def _max_drawdown(equity: list[tuple[datetime, float]]) -> float | None:
   """Max peak-to-trough decline, as a negative fraction.
 
   Returns 0.0 for a monotone-rising curve, None for <2 points, and the
-  most negative (nav / running_max - 1) otherwise.
+  most negative (nav / running_max - 1) otherwise. Values below -1.0 are
+  floored to -1.0 (NAV went below zero, which means an upstream
+  accounting bug — log a warning and don't propagate the nonsense to
+  the UI, where it would show as "-199% drawdown").
   """
   if len(equity) < 2:
     return None
@@ -61,6 +67,13 @@ def _max_drawdown(equity: list[tuple[datetime, float]]) -> float | None:
       dd = nav / peak - 1.0
       if dd < worst:
         worst = dd
+  if worst < -1.0:
+    logger.warning(
+      "max_drawdown below -100%% (%.4f); NAV went negative, check for "
+      "upstream accounting bug. Clamping to -1.0.",
+      worst,
+    )
+    return -1.0
   return worst
 
 
