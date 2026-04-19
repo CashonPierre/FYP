@@ -254,6 +254,8 @@ def get_backtest_results(
       max_drawdown=metrics.max_drawdown,
       volatility=metrics.volatility,
       sharpe=metrics.sharpe,
+      sortino=metrics.sortino,
+      calmar=metrics.calmar,
       total_trades=metrics.total_trades,
       win_rate=metrics.win_rate,
       fees=metrics.fees,
@@ -316,11 +318,21 @@ def get_backtest_results(
     for row in session.execute(equity_stmt).scalars().all()
   ]
 
+  strategy_name: str | None = None
+  if run.strategy_id is not None:
+    from database.models import Strategy
+    strat = session.get(Strategy, run.strategy_id)
+    if strat is not None:
+      strategy_name = strat.name
+
   return BacktestResults(
     id=run.id,
     status=run.status,
     symbol=symbol or None,
     timeframe=timeframe or None,
+    start_date=start_date or None,
+    end_date=end_date or None,
+    strategy_name=strategy_name,
     summary=summary,
     series=ResultSeries(
       ohlc=ohlc_points,

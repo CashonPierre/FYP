@@ -21,6 +21,8 @@
     max_drawdown: number | null;
     volatility: number | null;
     sharpe: number | null;
+    sortino: number | null;
+    calmar: number | null;
     total_trades: number;
     win_rate: number | null;
     fees: number;
@@ -32,6 +34,9 @@
     status: string;
     symbol: string | null;
     timeframe: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    strategy_name: string | null;
     summary: ApiSummary | null;
     series: {
       ohlc: { time: string; open: number; high: number; low: number; close: number; volume: number | null }[];
@@ -334,14 +339,16 @@
         : null;
     const symbol = (apiSymbol ?? payloadSymbol ?? '').toUpperCase() || '—';
     const timeframe = apiTimeframe ?? payloadTimeframe ?? '1D';
-    const startDate =
+    const payloadStart =
       payload?.settings?.startDate && typeof payload.settings.startDate === 'string'
         ? payload.settings.startDate
         : null;
-    const endDate =
+    const payloadEnd =
       payload?.settings?.endDate && typeof payload.settings.endDate === 'string'
         ? payload.settings.endDate
         : null;
+    const startDate = apiResults?.start_date ?? payloadStart;
+    const endDate = apiResults?.end_date ?? payloadEnd;
 
     const initialCapital = api?.initial_capital ?? 10000;
     const nav = api?.final_nav ?? initialCapital;
@@ -359,11 +366,13 @@
       maxDrawdown: api?.max_drawdown ?? null,
       volatility: api?.volatility ?? null,
       sharpeRatio: api?.sharpe ?? null,
+      sortino: api?.sortino ?? null,
+      calmar: api?.calmar ?? null,
       triggerSymbol: symbol,
       tradingSymbol: symbol,
       triggerSettings: `${symbol} — 1 bar per ${timeframe} candle`,
-      accountUsed: 'Backtesting Account',
-      backtestPeriod: startDate && endDate ? `${startDate} – ${endDate}` : 'Full available period',
+      strategyName: apiResults?.strategy_name ?? null,
+      backtestPeriod: startDate && endDate ? `${startDate} – ${endDate}` : '—',
       filledOrders: totalTrades,
       winRate,
     };
@@ -567,6 +576,8 @@
         <div class="space-y-2">
           <div class="text-xs font-medium text-muted-foreground">Parameters</div>
           <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+            <dt class="text-muted-foreground">Strategy</dt>
+            <dd class="text-right font-medium">{summary.strategyName ?? '—'}</dd>
             <dt class="text-muted-foreground">Symbol</dt>
             <dd class="text-right font-medium">{summary.triggerSymbol}</dd>
             <dt class="text-muted-foreground">Trigger Settings</dt>
@@ -594,6 +605,14 @@
             <dt class="text-muted-foreground">Sharpe Ratio</dt>
             <dd class="text-right font-medium">
               {summary.sharpeRatio != null ? fmtNumber3(summary.sharpeRatio) : '—'}
+            </dd>
+            <dt class="text-muted-foreground">Sortino Ratio</dt>
+            <dd class="text-right font-medium">
+              {summary.sortino != null ? fmtNumber3(summary.sortino) : '—'}
+            </dd>
+            <dt class="text-muted-foreground">Calmar Ratio</dt>
+            <dd class="text-right font-medium">
+              {summary.calmar != null ? fmtNumber3(summary.calmar) : '—'}
             </dd>
             <dt class="text-muted-foreground">Total Trades</dt>
             <dd class="text-right font-medium">{summary.filledOrders}</dd>

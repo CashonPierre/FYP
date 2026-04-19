@@ -116,6 +116,8 @@ class ResultSummary(BaseModel):
   max_drawdown: float | None = None
   volatility: float | None = None
   sharpe: float | None = None
+  sortino: float | None = None
+  calmar: float | None = None
   total_trades: int
   win_rate: float | None = None
   fees: float
@@ -133,6 +135,9 @@ class BacktestResults(BaseModel):
   status: str
   symbol: str | None = None          # so the UI can label charts without re-reading settings
   timeframe: str | None = None
+  start_date: str | None = None      # as recorded in run settings (may be None)
+  end_date: str | None = None
+  strategy_name: str | None = None   # from strategies.name when strategy_id set
   summary: ResultSummary | None = None
   series: ResultSeries = ResultSeries()
 
