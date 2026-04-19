@@ -172,8 +172,15 @@
   let showExport = $state(false);
   let showImport = $state(false);
   let showTemplates = $state(false);
+  let showAiBuilder = $state(false);
   let exportJson = $state('');
   let importJson = $state('');
+
+  // AI graph builder — prompts LLM to generate a graph from free-text idea.
+  let aiPrompt = $state('');
+  let aiLoading = $state(false);
+  let aiError = $state<string | null>(null);
+  let aiResult = $state<{ graph: { nodes: unknown[]; edges: unknown[] }; notes: string } | null>(null);
   let targetSymbol = $state('AAPL');
   let periodStart = $state('2013-01-01'); // YYYY-MM-DD — dense S&P 500 data starts here
   let periodEnd = $state('2018-12-31');   // YYYY-MM-DD — dense data ends here; clear for full range
@@ -1129,6 +1136,67 @@
     showExport = false;
   };
 
+  const openAiBuilder = () => {
+    showAiBuilder = true;
+    showImport = false;
+    showExport = false;
+    showTemplates = false;
+    aiError = null;
+    aiResult = null;
+  };
+
+  const submitAiPrompt = async () => {
+    if (aiLoading) return;
+    const trimmed = aiPrompt.trim();
+    if (trimmed.length < 4) {
+      aiError = 'Describe your idea in at least a few words.';
+      return;
+    }
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Please log in first.');
+      goto('/login');
+      return;
+    }
+    aiLoading = true;
+    aiError = null;
+    aiResult = null;
+    try {
+      const res = await fetch(`${BACKEND}/ai/build-graph`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ prompt: trimmed }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const msg = body?.detail ?? `Request failed (${res.status})`;
+        aiError = typeof msg === 'string' ? msg : 'Generation failed.';
+        return;
+      }
+      aiResult = await res.json();
+    } catch (err) {
+      aiError = err instanceof Error ? err.message : 'Could not reach backend.';
+    } finally {
+      aiLoading = false;
+    }
+  };
+
+  const applyAiGraph = () => {
+    if (!aiResult) return;
+    try {
+      applyImportedPayload(aiResult.graph);
+      showAiBuilder = false;
+      toast.success('Applied AI-generated graph');
+      aiPrompt = '';
+      aiResult = null;
+    } catch (err) {
+      aiError = err instanceof Error ? err.message : 'Failed to apply graph';
+    }
+  };
+
   const applyTemplate = (templateId: string) => {
     const template = STRATEGY_TEMPLATES.find((t) => t.id === templateId);
     if (!template) return;
@@ -1759,6 +1827,7 @@
 
   <div class="flex flex-wrap items-center justify-end gap-2">
     <Button variant="outline" onclick={openTemplates}>Templates</Button>
+    <Button variant="outline" onclick={openAiBuilder}>AI Builder</Button>
     <Button variant="outline" onclick={saveDraft} disabled={nodes.length === 0}>
       Save Draft
     </Button>
@@ -2054,6 +2123,83 @@
             </Button>
           </div>
         {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showAiBuilder}
+  <div
+    class="fixed inset-0 z-50 bg-black/40"
+    role="dialog"
+    aria-modal="true"
+    onpointerdown={(e) => { if (e.currentTarget === e.target) showAiBuilder = false; }}
+  >
+    <div class="mx-auto mt-16 w-[min(720px,calc(100vw-2rem))] rounded-lg border bg-background shadow-lg">
+      <div class="flex items-center justify-between border-b px-4 py-3">
+        <div class="font-semibold">AI Builder</div>
+        <button
+          class="rounded-md px-2 py-1 text-sm hover:bg-accent"
+          type="button"
+          onclick={() => { showAiBuilder = false; }}
+        >
+          Close
+        </button>
+      </div>
+
+      <div class="space-y-3 p-4">
+        <div class="space-y-1.5">
+          <Label for="ai-prompt">Describe your strategy</Label>
+          <Textarea
+            id="ai-prompt"
+            class="h-[140px] text-sm"
+            placeholder={`e.g. "Golden cross on SPY with a 3% stop-loss" or\n"Buy when RSI crosses above 30 AND MACD histogram is positive, exit on 3% trailing stop"`}
+            bind:value={aiPrompt}
+            disabled={aiLoading}
+          />
+          <p class="text-xs text-muted-foreground">
+            The AI will translate your idea into a runnable node graph. Review before applying.
+          </p>
+        </div>
+
+        {#if aiError}
+          <Alert.Root variant="destructive">
+            <Alert.Description class="text-xs">{aiError}</Alert.Description>
+          </Alert.Root>
+        {/if}
+
+        {#if aiResult}
+          <div class="rounded-md border bg-muted/30 p-3 text-sm">
+            <div class="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Strategy summary
+            </div>
+            <p class="mb-2 text-sm">{aiResult.notes || 'No notes provided.'}</p>
+            <div class="text-xs text-muted-foreground">
+              Generated {aiResult.graph.nodes.length} nodes and {aiResult.graph.edges.length} connections.
+              Applying will replace the current canvas.
+            </div>
+          </div>
+        {/if}
+
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <Button
+            variant="outline"
+            onclick={() => { showAiBuilder = false; }}
+            disabled={aiLoading}
+          >
+            Cancel
+          </Button>
+          {#if aiResult}
+            <Button variant="outline" onclick={submitAiPrompt} disabled={aiLoading}>
+              Regenerate
+            </Button>
+            <Button onclick={applyAiGraph}>Apply to canvas</Button>
+          {:else}
+            <Button onclick={submitAiPrompt} disabled={aiLoading || aiPrompt.trim().length < 4}>
+              {aiLoading ? 'Generating…' : 'Generate'}
+            </Button>
+          {/if}
+        </div>
       </div>
     </div>
   </div>

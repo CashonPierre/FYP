@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     # CLI and via `OHLC_SOURCE=yfinance` in the environment.
     ohlc_source: str = Field(default="fmp")
 
+    # LLM graph builder (OpenRouter proxy — Claude / OpenAI / etc.)
+    openrouter_api_key: str = Field(default="")
+    openrouter_model: str = Field(default="anthropic/claude-haiku-4.5")
+    openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1")
+
     # email
     resend_api_key: str = Field(default="")
     resend_from_email: str = Field(default="onboarding@resend.dev")

@@ -27,6 +27,7 @@ dependencies = [
   "pandas>=2.0.0",
   "pandas-ta",
   "python-multipart>=0.0.9",
+  "openai>=1.50.0",
 ]
 
 [project.optional-dependencies]

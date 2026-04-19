@@ -11,6 +11,7 @@ from api.market import market_router
 from api.backtests import backtest_router
 from api.strategies import strategy_router
 from api.user import user_router, dataset_router
+from api.ai import ai_router
 from app_common.exception_handlers import app_error_handler
 from app_common.exceptions import AppError
 
@@ -44,6 +45,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(router=strategy_router)
     app.include_router(router=user_router)
     app.include_router(router=dataset_router)
+    app.include_router(router=ai_router)
 
 
 def register_exception_handler(app: FastAPI) -> None:
