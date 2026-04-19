@@ -234,6 +234,52 @@ class BuiltGraph(BaseModel):
     return self
 
 
+AssetMode = Literal["single", "multi", "universe", "dataset"]
+
+# Universe keys from backend/api/market/universes.py. Kept short here —
+# the prompt lists the full set. If we add a new universe later, add it
+# both there and here.
+UniverseKey = Literal[
+  "mag7",
+  "dow30",
+  "nasdaq_top20",
+  "sp500_top20",
+  "sp500",
+]
+
+
+class AssetSettings(BaseModel):
+  """Optional run-settings hints from the LLM. Anything the model doesn't
+  set is left to whatever the canvas already has — so a prompt like
+  "buy when RSI < 30" returns settings={} and inherits the user's current
+  symbol/dates."""
+
+  mode: AssetMode | None = None
+  symbol: str | None = Field(default=None, max_length=16)
+  symbols: list[str] | None = None
+  universe: UniverseKey | None = None
+  startDate: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+  endDate: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+  @field_validator("symbols")
+  @classmethod
+  def _normalize_symbols(cls, v: list[str] | None) -> list[str] | None:
+    if v is None:
+      return None
+    cleaned = [s.strip().upper() for s in v if s and s.strip()]
+    if not cleaned:
+      return None
+    return cleaned
+
+  @field_validator("symbol")
+  @classmethod
+  def _normalize_symbol(cls, v: str | None) -> str | None:
+    if v is None:
+      return None
+    s = v.strip().upper()
+    return s or None
+
+
 class BuildGraphRequest(BaseModel):
   prompt: str = Field(min_length=4, max_length=2000)
 
@@ -242,3 +288,7 @@ class BuildGraphResponse(BaseModel):
   graph: BuiltGraph
   notes: str = ""
   """Free-text explanation from the LLM, shown above the preview."""
+
+  settings: AssetSettings = Field(default_factory=AssetSettings)
+  """Optional asset/date hints. The frontend applies whatever is set
+  (mode, symbol/symbols/universe, start/end) before loading the graph."""

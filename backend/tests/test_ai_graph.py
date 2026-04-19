@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Custom
-from api.ai.schemas import BuiltGraph
+from api.ai.schemas import AssetSettings, BuiltGraph
 
 
 # --- Pydantic validation of the graph shape -------------------------------
@@ -106,6 +106,60 @@ class TestBuiltGraphValidator:
         ],
         "edges": [],
       })
+
+
+# --- AssetSettings validation --------------------------------------------
+
+class TestAssetSettings:
+  def test_empty_settings_valid(self):
+    s = AssetSettings.model_validate({})
+    assert s.mode is None
+    assert s.symbol is None
+    assert s.universe is None
+
+  def test_mode_enum_enforced(self):
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+      AssetSettings.model_validate({"mode": "bogus"})
+
+  def test_universe_enum_enforced(self):
+    """Only keys from backend/api/market/universes.py are accepted."""
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+      AssetSettings.model_validate({"universe": "ftse100"})
+
+  def test_known_universes_accepted(self):
+    for key in ("mag7", "dow30", "nasdaq_top20", "sp500_top20", "sp500"):
+      s = AssetSettings.model_validate({"universe": key})
+      assert s.universe == key
+
+  def test_symbol_uppercased(self):
+    s = AssetSettings.model_validate({"symbol": " aapl "})
+    assert s.symbol == "AAPL"
+
+  def test_symbols_uppercased_and_cleaned(self):
+    s = AssetSettings.model_validate(
+      {"symbols": [" aapl ", "", "msft", "  "]}
+    )
+    assert s.symbols == ["AAPL", "MSFT"]
+
+  def test_empty_symbols_list_becomes_none(self):
+    s = AssetSettings.model_validate({"symbols": ["", "  "]})
+    assert s.symbols is None
+
+  def test_date_pattern_enforced(self):
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+      AssetSettings.model_validate({"startDate": "2020/01/01"})
+    with pytest.raises(ValidationError):
+      AssetSettings.model_validate({"endDate": "last week"})
+
+  def test_valid_dates(self):
+    s = AssetSettings.model_validate(
+      {"startDate": "2020-01-01", "endDate": "2024-12-31"}
+    )
+    assert s.startDate == "2020-01-01"
+    assert s.endDate == "2024-12-31"
 
 
 # --- Endpoint behaviour ---------------------------------------------------
@@ -312,3 +366,78 @@ def test_build_graph_gives_up_after_one_retry(auth_client: TestClient):
 def test_build_graph_rejects_short_prompt(auth_client: TestClient):
   resp = auth_client.post("/ai/build-graph", json={"prompt": "a"})
   assert resp.status_code == 422
+
+
+def test_build_graph_passes_asset_settings_through(auth_client: TestClient):
+  """LLM can return a `settings` block — it must reach the response intact."""
+  output = dict(_VALID_LLM_OUTPUT)
+  output["settings"] = {
+    "mode": "multi",
+    "universe": "mag7",
+    "startDate": "2021-01-01",
+    "endDate": "2025-12-31",
+  }
+  mock_client = MagicMock()
+  mock_client.chat.completions.create.return_value = _mock_completion(
+    json.dumps(output)
+  )
+  with patch("api.ai.service.settings") as s, \
+       patch("api.ai.service.OpenAI", return_value=mock_client):
+    s.openrouter_api_key = "sk-test"
+    s.openrouter_base_url = "https://openrouter.ai/api/v1"
+    s.openrouter_model = "anthropic/claude-haiku-4.5"
+    resp = auth_client.post(
+      "/ai/build-graph", json={"prompt": "golden cross on M7"}
+    )
+  assert resp.status_code == 200, resp.json()
+  body = resp.json()
+  assert body["settings"]["mode"] == "multi"
+  assert body["settings"]["universe"] == "mag7"
+  assert body["settings"]["startDate"] == "2021-01-01"
+  assert body["settings"]["endDate"] == "2025-12-31"
+
+
+def test_build_graph_defaults_settings_when_absent(auth_client: TestClient):
+  """A prompt without asset hints returns empty settings — canvas keeps state."""
+  mock_client = MagicMock()
+  mock_client.chat.completions.create.return_value = _mock_completion(
+    json.dumps(_VALID_LLM_OUTPUT)
+  )
+  with patch("api.ai.service.settings") as s, \
+       patch("api.ai.service.OpenAI", return_value=mock_client):
+    s.openrouter_api_key = "sk-test"
+    s.openrouter_base_url = "https://openrouter.ai/api/v1"
+    s.openrouter_model = "anthropic/claude-haiku-4.5"
+    resp = auth_client.post(
+      "/ai/build-graph", json={"prompt": "golden cross"}
+    )
+  assert resp.status_code == 200
+  body = resp.json()
+  assert body["settings"]["mode"] is None
+  assert body["settings"]["universe"] is None
+  assert body["settings"]["symbol"] is None
+
+
+def test_build_graph_rejects_bogus_universe(auth_client: TestClient):
+  """If the LLM hallucinates an unknown universe, validation fails."""
+  output = dict(_VALID_LLM_OUTPUT)
+  output["settings"] = {"mode": "universe", "universe": "ftse100"}
+  mock_client = MagicMock()
+  mock_client.chat.completions.create.return_value = _mock_completion(
+    json.dumps(output)
+  )
+  with patch("api.ai.service.settings") as s, \
+       patch("api.ai.service.OpenAI", return_value=mock_client):
+    s.openrouter_api_key = "sk-test"
+    s.openrouter_base_url = "https://openrouter.ai/api/v1"
+    s.openrouter_model = "anthropic/claude-haiku-4.5"
+    # Two attempts will both fail — endpoint surfaces 422.
+    mock_client.chat.completions.create.side_effect = [
+      _mock_completion(json.dumps(output)),
+      _mock_completion(json.dumps(output)),
+    ]
+    resp = auth_client.post(
+      "/ai/build-graph", json={"prompt": "buy on FTSE"}
+    )
+  assert resp.status_code == 422
+  assert "invalid asset settings" in resp.json()["detail"].lower()

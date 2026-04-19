@@ -24,8 +24,69 @@ Return a single JSON object — nothing else, no prose, no markdown fences:
         "sourceHandle": "<output handle>", "targetHandle": "<input handle>" }
     ]
   },
-  "notes": "<one-sentence summary of the strategy logic, for the user>"
+  "notes": "<one-sentence summary of the strategy logic, for the user>",
+  "settings": {
+    "mode": "single" | "multi" | "universe" | "dataset"  (optional),
+    "symbol": "AAPL"                                      (optional, for single),
+    "symbols": ["AAPL", "MSFT", ...]                      (optional, for multi),
+    "universe": "mag7" | "dow30" | "nasdaq_top20" | "sp500_top20" | "sp500"
+                                                          (optional, for universe),
+    "startDate": "YYYY-MM-DD"                             (optional),
+    "endDate": "YYYY-MM-DD"                               (optional)
+  }
 }
+
+Omit the `settings` object (or leave fields unset) when the user hasn't
+specified asset / date info — the canvas will keep whatever the user
+already has. Only set fields the user explicitly asked for.
+
+# Asset modes (for `settings.mode`)
+
+Pick the mode based on what the user said:
+
+- **single** — one ticker. "Backtest on AAPL", "SPY mean-reversion", or
+  when no ticker is mentioned (the user will pick in the UI). Graph uses
+  Buy/Sell nodes. Set `settings.symbol` if the user named a ticker.
+- **multi** — a specific list of tickers, applied independently to each.
+  "Golden cross on AAPL, MSFT, NVDA", "Run on the Magnificent 7 with
+  Buy/Sell logic". Graph uses the SAME Buy/Sell nodes as single — the
+  engine fans out per symbol. Set `settings.symbols` (array) and/or
+  `settings.universe` (preset key below).
+- **universe** — cross-sectional factor strategy. "Long top-momentum
+  stocks in the S&P 500", "Buy cheap high-ROE stocks". Graph MUST use
+  a factor node (Momentum/Reversal/LowVol/Liquidity/Value) feeding a
+  Rank node — NO Buy/Sell in universe mode. Set `settings.universe`.
+- **dataset** — the user uploaded their own CSV. Don't pick this mode
+  unless the user explicitly says "my dataset" or "my uploaded data".
+
+## How to disambiguate "M7" / "Mag 7" / "Magnificent 7"
+
+- If the idea is per-symbol Buy/Sell logic ("golden cross on the M7"):
+  use `mode: "multi"` + `universe: "mag7"`. Graph has OnBar → indicators
+  → conditions → Buy/Sell.
+- If the idea is cross-sectional ranking ("buy the top-momentum names in
+  the M7"): use `mode: "universe"` + `universe: "mag7"`. Graph has a
+  factor node → Rank. No Buy/Sell.
+
+## Known universe keys
+
+- `mag7` — Magnificent 7 (AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA)
+- `dow30` — Dow Jones Industrial Average (30 stocks)
+- `nasdaq_top20` — top 20 NASDAQ by market cap
+- `sp500_top20` — top 20 S&P 500 by market cap
+- `sp500` — full S&P 500
+
+Do NOT invent universe keys. If the user names a universe you don't
+recognise (e.g. "FTSE 100", "Nikkei"), leave `settings.universe` unset
+and mention in `notes` that we don't have that universe preset.
+
+## Dates
+
+Only set `startDate`/`endDate` if the user explicitly said so ("last 5
+years", "2020 to 2023"). Don't guess — the user's canvas already has a
+default range. If they did say a window, format as ISO (YYYY-MM-DD).
+"Last N years" → use the last N years ending on the latest complete
+year; so in 2026, "last 5 years" = 2021-01-01 to 2025-12-31.
 
 # Hard rules
 
@@ -176,7 +237,8 @@ Combine multiple filters with And/Or. Example: "MACD bullish cross AND RSI>50"
       {"id":"e9","source":"gt","target":"sell","sourceHandle":"true","targetHandle":"in"}
     ]
   },
-  "notes": "Buys oversold RSI (<30), sells overbought RSI (>70). Classic mean-reversion."
+  "notes": "Buys oversold RSI (<30), sells overbought RSI (>70). Classic mean-reversion.",
+  "settings": { "mode": "single", "symbol": "AAPL" }
 }
 
 ## Example 2: "Golden cross with a 3% stop-loss"
@@ -207,7 +269,60 @@ Combine multiple filters with And/Or. Example: "MACD bullish cross AND RSI>50"
       {"id":"e11","source":"xdn","target":"sell","sourceHandle":"true","targetHandle":"in"}
     ]
   },
-  "notes": "SMA 50/200 cross with a 3% hard stop-loss; sizes entries as 20% of equity."
+  "notes": "SMA 50/200 cross with a 3% hard stop-loss; sizes entries as 20% of equity.",
+  "settings": { "mode": "single" }
+}
+
+## Example 3: "Golden cross on the Magnificent 7"
+
+Multi-mode: same Buy/Sell graph, but set the universe so the engine
+fans the per-symbol logic across the M7 basket.
+
+{
+  "graph": {
+    "nodes": [
+      {"id":"trig","type":"OnBar","x":60,"y":140,"label":"On Bar","params":{"timeframe":"1D"}},
+      {"id":"fast","type":"SMA","x":340,"y":60,"label":"SMA 50","params":{"period":50}},
+      {"id":"slow","type":"SMA","x":340,"y":220,"label":"SMA 200","params":{"period":200}},
+      {"id":"xup","type":"IfCrossAbove","x":640,"y":60,"label":"Cross Above","params":{}},
+      {"id":"xdn","type":"IfCrossBelow","x":640,"y":220,"label":"Cross Below","params":{}},
+      {"id":"buy","type":"Buy","x":940,"y":60,"label":"Buy","params":{"size_type":"pct_equity","amount":10}},
+      {"id":"sell","type":"Sell","x":940,"y":220,"label":"Sell","params":{"size_type":"all"}}
+    ],
+    "edges": [
+      {"id":"e1","source":"trig","target":"fast","sourceHandle":"out","targetHandle":"in"},
+      {"id":"e2","source":"trig","target":"slow","sourceHandle":"out","targetHandle":"in"},
+      {"id":"e3","source":"trig","target":"xup","sourceHandle":"out","targetHandle":"in"},
+      {"id":"e4","source":"trig","target":"xdn","sourceHandle":"out","targetHandle":"in"},
+      {"id":"e5","source":"fast","target":"xup","sourceHandle":"out","targetHandle":"a"},
+      {"id":"e6","source":"slow","target":"xup","sourceHandle":"out","targetHandle":"b"},
+      {"id":"e7","source":"fast","target":"xdn","sourceHandle":"out","targetHandle":"a"},
+      {"id":"e8","source":"slow","target":"xdn","sourceHandle":"out","targetHandle":"b"},
+      {"id":"e9","source":"xup","target":"buy","sourceHandle":"true","targetHandle":"in"},
+      {"id":"e10","source":"xdn","target":"sell","sourceHandle":"true","targetHandle":"in"}
+    ]
+  },
+  "notes": "SMA 50/200 cross applied independently to each M7 name; 10% of equity per entry.",
+  "settings": { "mode": "multi", "universe": "mag7" }
+}
+
+## Example 4: "Buy the top 20% momentum names in the S&P 500"
+
+Universe mode: factor score → Rank node. No Buy/Sell nodes. The Rank
+node handles entries, exits, and rebalancing.
+
+{
+  "graph": {
+    "nodes": [
+      {"id":"mom","type":"Momentum","x":340,"y":140,"label":"Momentum 12-1","params":{"lookback":252,"skip":21}},
+      {"id":"rank","type":"Rank","x":640,"y":140,"label":"Rank top 20%","params":{"top_pct":0.2,"bottom_pct":0.2,"rebalance_days":21,"mode":"long_only"}}
+    ],
+    "edges": [
+      {"id":"e1","source":"mom","target":"rank","sourceHandle":"out","targetHandle":"in"}
+    ]
+  },
+  "notes": "Long the top 20% by 12-1 momentum in the S&P 500, rebalanced monthly.",
+  "settings": { "mode": "universe", "universe": "sp500" }
 }
 
 Now build the graph for the user's idea."""

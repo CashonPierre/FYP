@@ -180,7 +180,19 @@
   let aiPrompt = $state('');
   let aiLoading = $state(false);
   let aiError = $state<string | null>(null);
-  let aiResult = $state<{ graph: { nodes: unknown[]; edges: unknown[] }; notes: string } | null>(null);
+  type AiSettings = {
+    mode?: 'single' | 'multi' | 'universe' | 'dataset' | null;
+    symbol?: string | null;
+    symbols?: string[] | null;
+    universe?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  };
+  let aiResult = $state<{
+    graph: { nodes: unknown[]; edges: unknown[] };
+    notes: string;
+    settings?: AiSettings;
+  } | null>(null);
   let targetSymbol = $state('AAPL');
   let periodStart = $state('2013-01-01'); // YYYY-MM-DD — dense S&P 500 data starts here
   let periodEnd = $state('2018-12-31');   // YYYY-MM-DD — dense data ends here; clear for full range
@@ -1187,6 +1199,19 @@
   const applyAiGraph = () => {
     if (!aiResult) return;
     try {
+      // Apply asset settings first so the picker reflects the LLM's intent
+      // before the graph loads. Only override fields the LLM actually set —
+      // unset fields inherit whatever the canvas already has.
+      const s = aiResult.settings ?? {};
+      if (s.mode) assetMode = s.mode;
+      if (s.universe) selectedUniverse = s.universe;
+      if (s.symbols && s.symbols.length > 0) {
+        multiSymbolsText = s.symbols.join(', ');
+      }
+      if (s.symbol) targetSymbol = s.symbol;
+      if (s.startDate) periodStart = s.startDate;
+      if (s.endDate) periodEnd = s.endDate;
+
       applyImportedPayload(aiResult.graph);
       showAiBuilder = false;
       toast.success('Applied AI-generated graph');
@@ -2178,6 +2203,28 @@
               Generated {aiResult.graph.nodes.length} nodes and {aiResult.graph.edges.length} connections.
               Applying will replace the current canvas.
             </div>
+            {#if aiResult.settings && (aiResult.settings.mode || aiResult.settings.universe || aiResult.settings.symbol || (aiResult.settings.symbols && aiResult.settings.symbols.length > 0) || aiResult.settings.startDate || aiResult.settings.endDate)}
+              <div class="mt-2 flex flex-wrap gap-1 text-xs">
+                {#if aiResult.settings.mode}
+                  <span class="rounded border bg-background px-1.5 py-0.5">mode: {aiResult.settings.mode}</span>
+                {/if}
+                {#if aiResult.settings.universe}
+                  <span class="rounded border bg-background px-1.5 py-0.5">universe: {aiResult.settings.universe}</span>
+                {/if}
+                {#if aiResult.settings.symbol}
+                  <span class="rounded border bg-background px-1.5 py-0.5">symbol: {aiResult.settings.symbol}</span>
+                {/if}
+                {#if aiResult.settings.symbols && aiResult.settings.symbols.length > 0}
+                  <span class="rounded border bg-background px-1.5 py-0.5">symbols: {aiResult.settings.symbols.join(', ')}</span>
+                {/if}
+                {#if aiResult.settings.startDate}
+                  <span class="rounded border bg-background px-1.5 py-0.5">start: {aiResult.settings.startDate}</span>
+                {/if}
+                {#if aiResult.settings.endDate}
+                  <span class="rounded border bg-background px-1.5 py-0.5">end: {aiResult.settings.endDate}</span>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/if}
 

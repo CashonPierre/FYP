@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from app_common.enums import ExceptionEnum
 from app_common.exceptions import AppError
 from configs import settings
-from .schemas import BuildGraphResponse, BuiltGraph
+from .schemas import AssetSettings, BuildGraphResponse, BuiltGraph
 from .system_prompt import SYSTEM_PROMPT
 
 
@@ -63,7 +63,7 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 def _parse_and_validate(
   text: str,
-) -> tuple[BuiltGraph, str]:
+) -> tuple[BuiltGraph, str, AssetSettings]:
   """Parse the LLM response. Raises LLMGraphError on malformed JSON
   or schema-invalid graphs."""
   if not text:
@@ -79,6 +79,7 @@ def _parse_and_validate(
 
   graph_data = raw.get("graph", raw) if isinstance(raw, dict) else raw
   notes = raw.get("notes", "") if isinstance(raw, dict) else ""
+  settings_data = raw.get("settings", {}) if isinstance(raw, dict) else {}
 
   try:
     graph = BuiltGraph.model_validate(graph_data)
@@ -89,7 +90,18 @@ def _parse_and_validate(
       f"Validation errors: {exc.errors()[:5]}"
     ) from exc
 
-  return graph, str(notes)
+  try:
+    asset_settings = AssetSettings.model_validate(
+      settings_data if isinstance(settings_data, dict) else {}
+    )
+  except ValidationError as exc:
+    logger.warning("LLM settings failed validation: %s", exc.errors())
+    raise LLMGraphError(
+      message="LLM produced invalid asset settings. "
+      f"Validation errors: {exc.errors()[:5]}"
+    ) from exc
+
+  return graph, str(notes), asset_settings
 
 
 def build_graph_from_prompt(prompt: str) -> BuildGraphResponse:
@@ -122,8 +134,10 @@ def build_graph_from_prompt(prompt: str) -> BuildGraphResponse:
     text = (completion.choices[0].message.content or "").strip()
 
     try:
-      graph, notes = _parse_and_validate(text)
-      return BuildGraphResponse(graph=graph, notes=notes)
+      graph, notes, asset_settings = _parse_and_validate(text)
+      return BuildGraphResponse(
+        graph=graph, notes=notes, settings=asset_settings
+      )
     except LLMGraphError as exc:
       last_error = exc
       if attempt >= _MAX_RETRIES:
