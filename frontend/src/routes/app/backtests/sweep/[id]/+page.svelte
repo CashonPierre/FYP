@@ -113,51 +113,83 @@
     const token = localStorage.getItem('token');
     if (!token || !meta) return;
 
-    const updated: SweepRow[] = await Promise.all(
-      meta.runs.map(async (r, i): Promise<SweepRow> => {
-        const vs = r.values ?? (r.value != null ? [r.value] : []);
-        const prev = rows[i] ?? {
-          values: vs,
-          runId: r.runId,
-          status: 'queued' as RunStatus,
-          summary: null,
-          equity: [],
-          error: null,
-        };
+    // Only poll runs that aren't already terminal — shrinks the status payload
+    // as the sweep progresses and avoids re-fetching results we already have.
+    const pending = rows.filter((r) => r.status !== 'completed' && r.status !== 'failed');
+    if (pending.length === 0) {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      loading = false;
+      return;
+    }
 
-        if (prev.status === 'completed' || prev.status === 'failed') return prev;
+    // Single batched status call instead of N parallel requests — keeps the
+    // backend's connection pool from being drained by a 36-cell grid.
+    type BatchStatusRow = {
+      id: string;
+      status: RunStatus;
+      error_message?: string | null;
+    };
+    let statusById = new Map<string, BatchStatusRow>();
+    try {
+      const qs = pending.map((r) => r.runId).join(',');
+      const res = await fetch(`${BACKEND}/backtests/status?ids=${encodeURIComponent(qs)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const list = (await res.json()) as BatchStatusRow[];
+      statusById = new Map(list.map((s) => [s.id, s]));
+    } catch {
+      return;
+    }
 
+    // Identify runs that just finished this tick — fetch full results for those.
+    const justCompleted: SweepRow[] = [];
+    const nextRows: SweepRow[] = rows.map((prev) => {
+      if (prev.status === 'completed' || prev.status === 'failed') return prev;
+      const s = statusById.get(prev.runId);
+      if (!s) return prev;
+      if (s.status === 'completed') {
+        justCompleted.push(prev);
+        return { ...prev, status: s.status };
+      }
+      return { ...prev, status: s.status, error: s.error_message ?? null };
+    });
+
+    // Fetch results for newly-completed runs (small batch per tick — usually
+    // just the handful that finished since the last poll).
+    const results = await Promise.all(
+      justCompleted.map(async (r) => {
         try {
-          const statusRes = await fetch(`${BACKEND}/backtests/${r.runId}/status`, {
+          const res = await fetch(`${BACKEND}/backtests/${r.runId}/results`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          if (!statusRes.ok) return prev;
-          const statusData = (await statusRes.json()) as { status: RunStatus; error_message?: string | null };
-          const nextStatus = statusData.status;
-
-          if (nextStatus === 'completed') {
-            const res = await fetch(`${BACKEND}/backtests/${r.runId}/results`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) {
-              return { ...prev, status: nextStatus };
-            }
-            const data = (await res.json()) as ApiResults;
-            return {
-              ...prev,
-              status: nextStatus,
-              summary: data.summary,
-              equity: data.series.equity,
-              error: null,
-            };
-          }
-          return { ...prev, status: nextStatus, error: statusData.error_message ?? null };
+          if (!res.ok) return null;
+          return (await res.json()) as ApiResults;
         } catch {
-          return prev;
+          return null;
         }
-      })
+      }),
     );
-    rows = updated;
+
+    const resultById = new Map<string, ApiResults>();
+    for (let i = 0; i < justCompleted.length; i++) {
+      const data = results[i];
+      if (data) resultById.set(justCompleted[i].runId, data);
+    }
+
+    rows = nextRows.map((r) => {
+      const data = resultById.get(r.runId);
+      if (!data) return r;
+      return {
+        ...r,
+        summary: data.summary,
+        equity: data.series.equity,
+        error: null,
+      };
+    });
 
     const allDone = rows.every((r) => r.status === 'completed' || r.status === 'failed');
     if (allDone && pollTimer) {

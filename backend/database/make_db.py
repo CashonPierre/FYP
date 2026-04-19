@@ -25,8 +25,13 @@ engine_kwargs: dict = {
 if is_sqlite:
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 else:
-    engine_kwargs["pool_size"] = 10
-    engine_kwargs["max_overflow"] = 20
+    # The sweep results page polls status per run in parallel — a 15-cell
+    # 2-D grid + 2 Celery workers + background fetchers easily exceeded the
+    # previous 10+20 cap, producing QueuePool TimeoutErrors under load.
+    engine_kwargs["pool_size"] = 30
+    engine_kwargs["max_overflow"] = 70
+    # Recycle connections before cloud providers silently drop idle ones.
+    engine_kwargs["pool_recycle"] = 1800
 
 engine = create_engine(**engine_kwargs)
 

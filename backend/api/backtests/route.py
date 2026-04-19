@@ -200,6 +200,57 @@ def list_backtests(
 
 
 @backtest_router.get(
+  path="/status",
+  response_model=list[BacktestStatus],
+  status_code=status.HTTP_200_OK,
+)
+def get_backtest_statuses_batch(
+  ids: str,
+  current_user: CurrentUser = Depends(get_current_user),
+  session: Session = Depends(get_session),
+) -> list[BacktestStatus]:
+  """Batch status endpoint: `GET /backtests/status?ids=a,b,c`.
+
+  Returns status records for every requested id in one DB round trip.
+  Used by the sweep page so polling 15-36 runs doesn't fan out into
+  15-36 parallel requests every 2s (which exhausted the connection pool).
+  Unknown or unauthorised ids are silently skipped.
+  """
+  from sqlalchemy import select
+
+  run_ids: list[uuid.UUID] = []
+  for tok in (ids or "").split(","):
+    tok = tok.strip()
+    if not tok:
+      continue
+    try:
+      run_ids.append(uuid.UUID(tok))
+    except ValueError:
+      continue  # ignore junk, don't 400 the whole batch
+
+  if not run_ids:
+    return []
+
+  # Cap to prevent pathological query sizes (current UI cap: 36 runs per sweep)
+  run_ids = run_ids[:64]
+
+  rows = session.execute(
+    select(BacktestRun).where(BacktestRun.id.in_(run_ids))
+  ).scalars().all()
+
+  return [
+    BacktestStatus(
+      id=r.id,
+      status=r.status,
+      started_at=r.started_at,
+      ended_at=r.ended_at,
+      error_message=r.error_message,
+    )
+    for r in rows
+  ]
+
+
+@backtest_router.get(
   path="/{run_id}/status",
   response_model=BacktestStatus,
   status_code=status.HTTP_200_OK,
