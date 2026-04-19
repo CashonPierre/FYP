@@ -139,6 +139,18 @@ def test_max_drawdown_tracks_peak_not_final_bar():
   assert abs(m.max_drawdown - (-0.25)) < 1e-9
 
 
+def test_max_drawdown_clamped_when_nav_goes_negative(caplog):
+  # Defensive clamp: if an upstream accounting bug lets NAV go below zero
+  # (as happened before the engine cash-clamp fix), the raw math would
+  # produce drawdowns worse than -100%. Cap at -1.0 so the UI never
+  # displays nonsense like "-199%", and log a warning so the real bug
+  # is still visible in server logs.
+  equity = _mk([100, 80, -50, 20])
+  m = compute(equity=equity, initial_capital=100.0)
+  assert m.max_drawdown == -1.0
+  assert any("below -100%" in r.message for r in caplog.records)
+
+
 # ---------------------------------------------------------------------------
 # Profitable run with mixed returns must produce a positive Sortino
 # ---------------------------------------------------------------------------
