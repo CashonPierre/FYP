@@ -4,6 +4,9 @@
   import { toast } from 'svelte-sonner';
   import { Button } from '$lib/components/ui/button/index.js';
   import * as Card from '$lib/components/ui/card/index.js';
+  import { Skeleton } from '$lib/components/ui/skeleton/index.js';
+  import { EmptyState } from '$lib/components/ui/empty-state/index.js';
+  import { FlaskConical } from '@lucide/svelte';
   import { BACKEND } from '$lib/config.js';
 
   type RunStatus = 'queued' | 'running' | 'completed' | 'failed';
@@ -106,17 +109,21 @@
 
 <div class="mt-6">
   {#if loading}
-    <div class="text-sm text-muted-foreground">Loading…</div>
-  {:else if runs.length === 0}
-    <div class="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">
-      No backtest runs yet.
-      <button
-        class="ml-1 font-medium text-primary hover:underline"
-        onclick={() => goto('/app/backtests/new')}
-      >
-        Create one now.
-      </button>
+    <div class="space-y-2">
+      {#each Array(4) as _, i (i)}
+        <Skeleton class="h-20 w-full" />
+      {/each}
     </div>
+  {:else if runs.length === 0}
+    <EmptyState
+      icon={FlaskConical}
+      title="No backtest runs yet"
+      description="Build a strategy in the visual editor, pick a symbol and date range, and run your first backtest to see equity curve, trades and performance metrics here."
+    >
+      {#snippet action()}
+        <Button onclick={() => goto('/app/backtests/new')}>Create your first backtest</Button>
+      {/snippet}
+    </EmptyState>
   {:else}
     <div class="space-y-2">
       {#each runs as run (run.id)}

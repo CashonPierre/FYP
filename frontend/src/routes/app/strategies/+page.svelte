@@ -5,6 +5,9 @@
   import { Button } from '$lib/components/ui/button/index.js';
   import * as Card from '$lib/components/ui/card/index.js';
   import { Input } from '$lib/components/ui/input/index.js';
+  import { Skeleton } from '$lib/components/ui/skeleton/index.js';
+  import { EmptyState } from '$lib/components/ui/empty-state/index.js';
+  import { Workflow, SearchX } from '@lucide/svelte';
   import { BACKEND } from '$lib/config.js';
 
   type StrategyItem = {
@@ -111,21 +114,27 @@
 
 <div class="mt-4">
   {#if loading}
-    <div class="text-sm text-muted-foreground">Loading…</div>
+    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {#each Array(6) as _, i (i)}
+        <Skeleton class="h-32 w-full" />
+      {/each}
+    </div>
   {:else if strategies.length === 0}
-    <div class="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">
-      No saved strategies yet.
-      <button
-        class="ml-1 font-medium text-primary hover:underline"
-        onclick={() => goto('/app/backtests/new')}
-      >
-        Build one.
-      </button>
-    </div>
+    <EmptyState
+      icon={Workflow}
+      title="No saved strategies yet"
+      description="Drag nodes together in the builder to assemble a strategy graph, then save it here for reuse across backtests and parameter sweeps."
+    >
+      {#snippet action()}
+        <Button onclick={() => goto('/app/backtests/new')}>Build your first strategy</Button>
+      {/snippet}
+    </EmptyState>
   {:else if filtered.length === 0}
-    <div class="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">
-      No strategies match your search.
-    </div>
+    <EmptyState
+      icon={SearchX}
+      title="No strategies match your search"
+      description={`No saved strategy matches "${search}". Try a different name.`}
+    />
   {:else}
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {#each filtered as s (s.id)}
