@@ -1556,7 +1556,18 @@
 
   type ParamOverride = { nodeId: string; paramKey: string; value: number };
 
-  const buildSubmitBody = (override?: ParamOverride): {
+  const applyOverrides = (
+    nodeId: string,
+    data: Record<string, unknown>,
+    overrides: ParamOverride[] | undefined,
+  ) => {
+    if (!overrides) return;
+    for (const o of overrides) {
+      if (o.nodeId === nodeId) data[o.paramKey] = o.value;
+    }
+  };
+
+  const buildSubmitBody = (overrides?: ParamOverride[]): {
     body: Record<string, unknown>;
     symbolsList?: string[];
     universeKey?: string;
@@ -1574,7 +1585,7 @@
       }
       const nodesOut = exportPayload.graph.nodes.map((n) => {
         const data: Record<string, unknown> = { ...(n.params ?? {}) };
-        if (override && override.nodeId === n.id) data[override.paramKey] = override.value;
+        applyOverrides(n.id, data, overrides);
         return { id: n.id, type: n.type, position: { x: n.x, y: n.y }, data };
       });
       const body: Record<string, unknown> = {
@@ -1626,7 +1637,7 @@
 
     const nodesOut = exportPayload.graph.nodes.map((n) => {
       const data: Record<string, unknown> = { ...(n.params ?? {}) };
-      if (override && override.nodeId === n.id) data[override.paramKey] = override.value;
+      applyOverrides(n.id, data, overrides);
       return {
         id: n.id,
         type: n.type,
@@ -1722,6 +1733,12 @@
   let sweepNodeId = $state<string>('');
   let sweepParamKey = $state<string>('');
   let sweepValuesText = $state('');
+  // Optional second axis — when both param key and values are set, sweep runs
+  // the cartesian product. Kept empty ⇒ 1-D sweep (existing behaviour).
+  let sweep2Enabled = $state(false);
+  let sweepNodeId2 = $state<string>('');
+  let sweepParamKey2 = $state<string>('');
+  let sweepValuesText2 = $state('');
   let sweepRunning = $state(false);
 
   const sweepableNodes = $derived.by(() =>
@@ -1742,17 +1759,33 @@
       .map(([k]) => k);
   });
 
-  const parsedSweepValues = $derived.by(() => {
-    const raw = sweepValuesText
-      .split(/[,\s]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+  const selectedSweepNode2 = $derived.by(() =>
+    sweepableNodes.find((n) => n.id === sweepNodeId2) ?? null
+  );
+
+  const sweepParamOptions2 = $derived.by(() => {
+    if (!selectedSweepNode2) return [] as string[];
+    return Object.entries(selectedSweepNode2.params)
+      .filter(([, v]) => typeof v === 'number')
+      .map(([k]) => k);
+  });
+
+  const parseSweepValues = (raw: string): number[] => {
+    const tokens = raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
     const out: number[] = [];
-    for (const tok of raw) {
+    for (const tok of tokens) {
       const n = Number(tok);
       if (Number.isFinite(n)) out.push(n);
     }
     return out;
+  };
+
+  const parsedSweepValues = $derived.by(() => parseSweepValues(sweepValuesText));
+  const parsedSweepValues2 = $derived.by(() => parseSweepValues(sweepValuesText2));
+
+  const sweepTotalRuns = $derived.by(() => {
+    if (!sweep2Enabled) return parsedSweepValues.length;
+    return parsedSweepValues.length * parsedSweepValues2.length;
   });
 
   const openSweep = () => {
@@ -1760,6 +1793,10 @@
     sweepNodeId = first?.id ?? '';
     sweepParamKey = '';
     sweepValuesText = '';
+    sweep2Enabled = false;
+    sweepNodeId2 = first?.id ?? '';
+    sweepParamKey2 = '';
+    sweepValuesText2 = '';
     showSweep = true;
   };
 
@@ -1782,8 +1819,33 @@
       return;
     }
     if (values.length > 12) {
-      toast.error('Max 12 values per sweep');
+      toast.error('Max 12 values on each axis');
       return;
+    }
+
+    let values2: number[] = [];
+    if (sweep2Enabled) {
+      if (!sweepNodeId2 || !sweepParamKey2) {
+        toast.error('Pick a second node and parameter (or disable the second axis)');
+        return;
+      }
+      if (sweepNodeId === sweepNodeId2 && sweepParamKey === sweepParamKey2) {
+        toast.error('Second axis must differ from the first');
+        return;
+      }
+      values2 = parsedSweepValues2;
+      if (values2.length < 2) {
+        toast.error('Enter at least 2 values on the second axis');
+        return;
+      }
+      if (values2.length > 12) {
+        toast.error('Max 12 values on each axis');
+        return;
+      }
+      if (values.length * values2.length > 36) {
+        toast.error(`Grid too large: ${values.length}×${values2.length} = ${values.length * values2.length} > 36 runs`);
+        return;
+      }
     }
 
     const token = localStorage.getItem('token');
@@ -1794,12 +1856,36 @@
     }
 
     const nodeLabel = selectedSweepNode?.label ?? selectedSweepNode?.type ?? sweepNodeId;
+    const nodeLabel2 = selectedSweepNode2?.label ?? selectedSweepNode2?.type ?? sweepNodeId2;
+
+    type SweepRunResult = { values: number[]; runId: string };
+    const combinations: { overrides: ParamOverride[]; values: number[] }[] = [];
+    if (sweep2Enabled) {
+      for (const v1 of values) {
+        for (const v2 of values2) {
+          combinations.push({
+            overrides: [
+              { nodeId: sweepNodeId, paramKey: sweepParamKey, value: v1 },
+              { nodeId: sweepNodeId2, paramKey: sweepParamKey2, value: v2 },
+            ],
+            values: [v1, v2],
+          });
+        }
+      }
+    } else {
+      for (const v1 of values) {
+        combinations.push({
+          overrides: [{ nodeId: sweepNodeId, paramKey: sweepParamKey, value: v1 }],
+          values: [v1],
+        });
+      }
+    }
 
     sweepRunning = true;
-    const results: { value: number; runId: string }[] = [];
+    const results: SweepRunResult[] = [];
     try {
-      for (const value of values) {
-        const built = buildSubmitBody({ nodeId: sweepNodeId, paramKey: sweepParamKey, value });
+      for (const combo of combinations) {
+        const built = buildSubmitBody(combo.overrides);
         if (!built) {
           sweepRunning = false;
           return;
@@ -1818,12 +1904,13 @@
           try {
             msg = (JSON.parse(text) as { detail?: string }).detail ?? msg;
           } catch { /* ignore */ }
-          toast.error(`${nodeLabel} ${sweepParamKey}=${value}: ${msg}`);
+          const label = combo.overrides.map((o) => `${o.paramKey}=${o.value}`).join(', ');
+          toast.error(`${label}: ${msg}`);
           sweepRunning = false;
           return;
         }
         const data = (await resp.json()) as { id: string };
-        results.push({ value, runId: data.id });
+        results.push({ values: combo.values, runId: data.id });
       }
     } catch {
       toast.error('Could not reach backend — is it running?');
@@ -1832,13 +1919,26 @@
     }
 
     const sweepId = `sweep_${Date.now()}`;
+    const axes = [
+      { nodeLabel, paramKey: sweepParamKey, values },
+    ];
+    if (sweep2Enabled) {
+      axes.push({ nodeLabel: nodeLabel2, paramKey: sweepParamKey2, values: values2 });
+    }
     sessionStorage.setItem(
       `sweep:${sweepId}`,
       JSON.stringify({
         id: sweepId,
+        // legacy 1-D fields kept for back-compat with older metadata readers
         nodeLabel,
         paramKey: sweepParamKey,
-        runs: results,
+        axes,
+        runs: results.map((r) => ({
+          runId: r.runId,
+          values: r.values,
+          // legacy single-value field: only present on 1-D sweeps
+          value: r.values.length === 1 ? r.values[0] : undefined,
+        })),
         createdAt: new Date().toISOString(),
       })
     );
@@ -2023,51 +2123,116 @@
       </div>
       <div class="space-y-4 p-4 text-sm">
         <p class="text-muted-foreground">
-          Run the same strategy with different values for one numeric parameter.
-          Results land on a dedicated sweep page for side-by-side comparison.
+          Sweep one or two numeric parameters. With two axes, the grid runs every combination
+          and the results page shows a Sharpe-ranked heatmap so you can see whether the best
+          point sits in a flat plateau or next to a cliff.
         </p>
-        <div class="grid gap-3 sm:grid-cols-2">
-          <div class="space-y-1">
-            <Label for="sweepNode">Node</Label>
-            <select
-              id="sweepNode"
-              class="w-full rounded-md border bg-background px-3 py-2"
-              bind:value={sweepNodeId}
-              onchange={() => (sweepParamKey = '')}
-            >
-              <option value="">— Select —</option>
-              {#each sweepableNodes as n (n.id)}
-                <option value={n.id}>{n.label} ({n.type})</option>
-              {/each}
-            </select>
+
+        <div class="space-y-2 rounded-md border p-3">
+          <div class="text-xs font-medium uppercase text-muted-foreground">Axis 1</div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="space-y-1">
+              <Label for="sweepNode">Node</Label>
+              <select
+                id="sweepNode"
+                class="w-full rounded-md border bg-background px-3 py-2"
+                bind:value={sweepNodeId}
+                onchange={() => (sweepParamKey = '')}
+              >
+                <option value="">— Select —</option>
+                {#each sweepableNodes as n (n.id)}
+                  <option value={n.id}>{n.label} ({n.type})</option>
+                {/each}
+              </select>
+            </div>
+            <div class="space-y-1">
+              <Label for="sweepParam">Parameter</Label>
+              <select
+                id="sweepParam"
+                class="w-full rounded-md border bg-background px-3 py-2"
+                bind:value={sweepParamKey}
+                disabled={!selectedSweepNode}
+              >
+                <option value="">— Select —</option>
+                {#each sweepParamOptions as k (k)}
+                  <option value={k}>{k}</option>
+                {/each}
+              </select>
+            </div>
           </div>
           <div class="space-y-1">
-            <Label for="sweepParam">Parameter</Label>
-            <select
-              id="sweepParam"
-              class="w-full rounded-md border bg-background px-3 py-2"
-              bind:value={sweepParamKey}
-              disabled={!selectedSweepNode}
-            >
-              <option value="">— Select —</option>
-              {#each sweepParamOptions as k (k)}
-                <option value={k}>{k}</option>
-              {/each}
-            </select>
+            <Label for="sweepValues">Values (comma-separated, 2–12)</Label>
+            <Input
+              id="sweepValues"
+              bind:value={sweepValuesText}
+              placeholder="10, 20, 50, 100"
+            />
           </div>
         </div>
-        <div class="space-y-1">
-          <Label for="sweepValues">Values (comma-separated, 2–12)</Label>
-          <Input
-            id="sweepValues"
-            bind:value={sweepValuesText}
-            placeholder="10, 20, 50, 100"
-          />
-          <div class="text-xs text-muted-foreground">
+
+        <div class="space-y-2 rounded-md border p-3">
+          <label class="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+            <input
+              type="checkbox"
+              class="h-3.5 w-3.5 accent-primary"
+              bind:checked={sweep2Enabled}
+            />
+            Second axis (2-D grid)
+          </label>
+          {#if sweep2Enabled}
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div class="space-y-1">
+                <Label for="sweepNode2">Node</Label>
+                <select
+                  id="sweepNode2"
+                  class="w-full rounded-md border bg-background px-3 py-2"
+                  bind:value={sweepNodeId2}
+                  onchange={() => (sweepParamKey2 = '')}
+                >
+                  <option value="">— Select —</option>
+                  {#each sweepableNodes as n (n.id)}
+                    <option value={n.id}>{n.label} ({n.type})</option>
+                  {/each}
+                </select>
+              </div>
+              <div class="space-y-1">
+                <Label for="sweepParam2">Parameter</Label>
+                <select
+                  id="sweepParam2"
+                  class="w-full rounded-md border bg-background px-3 py-2"
+                  bind:value={sweepParamKey2}
+                  disabled={!selectedSweepNode2}
+                >
+                  <option value="">— Select —</option>
+                  {#each sweepParamOptions2 as k (k)}
+                    <option value={k}>{k}</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
+            <div class="space-y-1">
+              <Label for="sweepValues2">Values (comma-separated, 2–12)</Label>
+              <Input
+                id="sweepValues2"
+                bind:value={sweepValuesText2}
+                placeholder="100, 150, 200"
+              />
+            </div>
+          {/if}
+        </div>
+
+        <div class="text-xs text-muted-foreground">
+          {#if sweep2Enabled}
+            {#if parsedSweepValues.length >= 2 && parsedSweepValues2.length >= 2}
+              Will run {sweepTotalRuns} backtests ({parsedSweepValues.length} × {parsedSweepValues2.length}). Max 36.
+            {:else}
+              Enter ≥2 values on each axis. Grid cap: 36 runs.
+            {/if}
+          {:else}
             {parsedSweepValues.length > 0
               ? `Will run ${parsedSweepValues.length} backtests: ${parsedSweepValues.join(', ')}`
               : 'Each value = one backtest run.'}
-          </div>
+          {/if}
         </div>
         {#if assetMode !== 'single'}
           <div class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-200">
@@ -2080,9 +2245,16 @@
           </Button>
           <Button
             onclick={runSweep}
-            disabled={sweepRunning || assetMode !== 'single' || parsedSweepValues.length < 2 || !sweepNodeId || !sweepParamKey}
+            disabled={
+              sweepRunning ||
+              assetMode !== 'single' ||
+              parsedSweepValues.length < 2 ||
+              !sweepNodeId ||
+              !sweepParamKey ||
+              (sweep2Enabled && (parsedSweepValues2.length < 2 || !sweepNodeId2 || !sweepParamKey2 || sweepTotalRuns > 36))
+            }
           >
-            {sweepRunning ? 'Submitting…' : `Run Sweep (${parsedSweepValues.length})`}
+            {sweepRunning ? 'Submitting…' : `Run Sweep (${sweepTotalRuns})`}
           </Button>
         </div>
       </div>
