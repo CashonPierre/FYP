@@ -703,6 +703,72 @@ const dividendScreen: TemplatePayload = {
   },
 };
 
+// Quality + oversold: buy only high-ROE names when RSI is oversold. Combines
+// a fundamental quality filter (ROE) with a price-based timing signal (RSI).
+// Exercises both the ROE node and the And combinator.
+const roeRsiQuality: TemplatePayload = {
+  version: 0,
+  settings: baseSettings,
+  graph: {
+    nodes: [
+      { id: 'trig', type: 'OnBar', x: 80, y: 80, label: 'On Bar', params: { timeframe: '1D' } },
+      { id: 'roe',  type: 'ROE',   x: 80, y: 200, label: 'ROE', params: {} },
+      { id: 'qual', type: 'Constant', x: 80, y: 320, label: 'ROE > 0.15', params: { value: 0.15 } },
+      { id: 'rsi',  type: 'RSI',   x: 80, y: 440, label: 'RSI(14)', params: { period: 14 } },
+      { id: 'os',   type: 'Constant', x: 80, y: 560, label: 'RSI < 35', params: { value: 35 } },
+      { id: 'ifQ',  type: 'IfAbove', x: 420, y: 200, label: 'ROE > 0.15?', params: {} },
+      { id: 'ifO',  type: 'IfBelow', x: 420, y: 440, label: 'RSI < 35?', params: {} },
+      { id: 'and',  type: 'And',   x: 760, y: 320, label: 'Quality + Oversold', params: {} },
+      { id: 'buy',  type: 'Buy',   x: 1080, y: 320, label: 'Buy 20% equity', params: { size_type: 'pct_equity', amount: 20 } },
+      { id: 'sl',   type: 'StopLoss', x: 1080, y: 440, label: 'Stop -8%', params: { pct: 8 } },
+      { id: 'tp',   type: 'TakeProfit', x: 1080, y: 560, label: 'Take +15%', params: { pct: 15 } },
+    ],
+    edges: [
+      { id: 'e1', source: 'trig', target: 'ifQ', sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e2', source: 'roe',  target: 'ifQ', sourceHandle: 'out', targetHandle: 'a' },
+      { id: 'e3', source: 'qual', target: 'ifQ', sourceHandle: 'out', targetHandle: 'b' },
+      { id: 'e4', source: 'trig', target: 'rsi', sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e5', source: 'trig', target: 'ifO', sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e6', source: 'rsi',  target: 'ifO', sourceHandle: 'out', targetHandle: 'a' },
+      { id: 'e7', source: 'os',   target: 'ifO', sourceHandle: 'out', targetHandle: 'b' },
+      { id: 'e8', source: 'ifQ',  target: 'and', sourceHandle: 'true', targetHandle: 'a' },
+      { id: 'e9', source: 'ifO',  target: 'and', sourceHandle: 'true', targetHandle: 'b' },
+      { id: 'e10', source: 'and', target: 'buy', sourceHandle: 'true', targetHandle: 'in' },
+      { id: 'e11', source: 'trig', target: 'sl', sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e12', source: 'trig', target: 'tp', sourceHandle: 'out', targetHandle: 'in' },
+    ],
+  },
+};
+
+// EPS growth momentum: buy when the current TTM EPS exceeds last year's
+// baseline (captured as a Constant on the canvas). Direct use of the EPS
+// node as a number source. Exit on a cross below the baseline.
+const epsGrowth: TemplatePayload = {
+  version: 0,
+  settings: baseSettings,
+  graph: {
+    nodes: [
+      { id: 'trig', type: 'OnBar', x: 80, y: 80, label: 'On Bar', params: { timeframe: '1D' } },
+      { id: 'eps',  type: 'EPS',   x: 80, y: 200, label: 'EPS (TTM)', params: {} },
+      { id: 'base', type: 'Constant', x: 80, y: 320, label: 'Baseline EPS', params: { value: 6 } },
+      { id: 'ifBuy',  type: 'IfCrossAbove', x: 420, y: 160, label: 'EPS crosses up', params: {} },
+      { id: 'ifSell', type: 'IfCrossBelow', x: 420, y: 360, label: 'EPS crosses down', params: {} },
+      { id: 'buy',  type: 'Buy',  x: 760, y: 160, label: 'Buy 10% equity', params: { size_type: 'pct_equity', amount: 10 } },
+      { id: 'sell', type: 'Sell', x: 760, y: 360, label: 'Sell all', params: { size_type: 'all' } },
+    ],
+    edges: [
+      { id: 'e1', source: 'trig', target: 'ifBuy',  sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e2', source: 'eps',  target: 'ifBuy',  sourceHandle: 'out', targetHandle: 'a' },
+      { id: 'e3', source: 'base', target: 'ifBuy',  sourceHandle: 'out', targetHandle: 'b' },
+      { id: 'e4', source: 'ifBuy', target: 'buy',   sourceHandle: 'true', targetHandle: 'in' },
+      { id: 'e5', source: 'trig', target: 'ifSell', sourceHandle: 'out', targetHandle: 'in' },
+      { id: 'e6', source: 'eps',  target: 'ifSell', sourceHandle: 'out', targetHandle: 'a' },
+      { id: 'e7', source: 'base', target: 'ifSell', sourceHandle: 'out', targetHandle: 'b' },
+      { id: 'e8', source: 'ifSell', target: 'sell', sourceHandle: 'true', targetHandle: 'in' },
+    ],
+  },
+};
+
 // Template mode defaults — single/multi/dataset share the regular palette.
 const REGULAR_MODES: TemplateMode[] = ['single', 'multi', 'dataset'];
 const UNIVERSE_MODES: TemplateMode[] = ['universe'];
@@ -869,5 +935,19 @@ export const STRATEGY_TEMPLATES: TemplateDefinition[] = [
     description: 'Buy when TTM dividend yield is above 4%; sell once it compresses below 2%. Demonstrates the DividendYield node.',
     modes: REGULAR_MODES,
     payload: dividendScreen,
+  },
+  {
+    id: 'roe-rsi-quality',
+    name: 'ROE Quality + RSI Entry',
+    description: 'Enter only when ROE > 15% (quality filter) AND RSI(14) < 35 (oversold). Stop -8% / take-profit +15% manage the exit. Combines fundamental quality with price timing.',
+    modes: REGULAR_MODES,
+    payload: roeRsiQuality,
+  },
+  {
+    id: 'eps-growth',
+    name: 'EPS Growth Cross',
+    description: 'Buy when TTM EPS crosses above a baseline (e.g. prior-year EPS), sell on the inverse cross. Direct use of the EPS node as a number source.',
+    modes: REGULAR_MODES,
+    payload: epsGrowth,
   },
 ];
