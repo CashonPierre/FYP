@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # ~5 recent quarters, insufficient for any real backtest window.
     fmp_api_key: str = Field(default="")
     fundamentals_source: str = Field(default="fmp")
+    # OHLC daily-bar source. Default "fmp" because yfinance has proven
+    # rate-limit flaky; kept as a fallback via `--source yfinance` on the
+    # CLI and via `OHLC_SOURCE=yfinance` in the environment.
+    ohlc_source: str = Field(default="fmp")
 
     # email
     resend_api_key: str = Field(default="")

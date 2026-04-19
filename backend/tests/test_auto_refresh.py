@@ -53,8 +53,10 @@ def _patched(monkeypatch, engine):
   )
 
   fetch_mock = MagicMock(return_value={"rows_upserted": 10})
+  # The auto-refresh helper now routes through the source dispatcher rather
+  # than calling the yfinance fetcher directly, so we patch the dispatcher.
   monkeypatch.setattr(
-    "background.tasks.market_refresh.fetch_and_upsert",
+    "background.tasks.ohlc_dispatch.fetch_and_upsert_any",
     fetch_mock,
   )
 

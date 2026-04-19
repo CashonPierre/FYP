@@ -2,11 +2,11 @@
 Standalone CLI script — seed or refresh OHLCV market data.
 
 Usage:
-  # Refresh specific symbols
+  # Refresh specific symbols (FMP is the default source)
   uv run python scripts/refresh_ohlc.py --symbols AAPL MSFT NVDA
 
-  # Refresh a named universe
-  uv run python scripts/refresh_ohlc.py --universe mag7
+  # Refresh a named universe, force yfinance
+  uv run python scripts/refresh_ohlc.py --universe mag7 --source yfinance
 
   # Seed a universe from a specific start date (first-time load)
   uv run python scripts/refresh_ohlc.py --universe sp500_top20 --start 2010-01-01
@@ -16,6 +16,8 @@ Usage:
 
   # List available universes
   uv run python scripts/refresh_ohlc.py --list-universes
+
+Source precedence: --source > OHLC_SOURCE env > settings.ohlc_source (fmp).
 
 Run from the backend/ directory so that the package imports resolve correctly.
 """
@@ -42,8 +44,11 @@ def _list_universes() -> None:
         print()
 
 
-def _refresh(symbols: list[str], timeframe: str, start: str | None, dry_run: bool) -> None:
-    from background.tasks.market_refresh import fetch_and_upsert
+def _refresh(
+    symbols: list[str], timeframe: str, start: str | None,
+    dry_run: bool, source: str,
+) -> None:
+    from background.tasks.ohlc_dispatch import fetch_and_upsert_any
 
     total_upserted = 0
     failed: list[str] = []
@@ -54,7 +59,10 @@ def _refresh(symbols: list[str], timeframe: str, start: str | None, dry_run: boo
             print("(dry run — skipped)")
             continue
         try:
-            result = fetch_and_upsert(symbol=symbol, timeframe=timeframe, start=start)
+            result = fetch_and_upsert_any(
+                symbol=symbol, timeframe=timeframe,
+                start=start, source=source,
+            )
             rows = result["rows_upserted"]
             total_upserted += rows
             print(f"{rows} rows upserted (from {result['fetch_start']})")
@@ -71,18 +79,23 @@ def _refresh(symbols: list[str], timeframe: str, start: str | None, dry_run: boo
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Seed or refresh OHLCV market data from yfinance into the DB.",
+        description="Seed or refresh OHLCV market data into the DB (FMP by default).",
     )
 
-    source = parser.add_mutually_exclusive_group(required=False)
-    source.add_argument("--symbols", nargs="+", metavar="TICKER", help="Explicit ticker list")
-    source.add_argument("--universe", metavar="KEY", help="Named universe (e.g. mag7, dow30)")
-    source.add_argument("--all-universes", action="store_true", help="Refresh all defined universes")
-    source.add_argument("--list-universes", action="store_true", help="Print available universes and exit")
+    sel = parser.add_mutually_exclusive_group(required=False)
+    sel.add_argument("--symbols", nargs="+", metavar="TICKER", help="Explicit ticker list")
+    sel.add_argument("--universe", metavar="KEY", help="Named universe (e.g. mag7, dow30)")
+    sel.add_argument("--all-universes", action="store_true", help="Refresh all defined universes")
+    sel.add_argument("--list-universes", action="store_true", help="Print available universes and exit")
 
     parser.add_argument("--timeframe", default="1D", choices=["1D", "1W", "1M"], help="Bar timeframe (default: 1D)")
     parser.add_argument("--start", metavar="YYYY-MM-DD", help="Force fetch from this date (default: resume from last bar in DB)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be fetched without writing to DB")
+    parser.add_argument(
+        "--source", choices=("fmp", "yfinance"),
+        default=os.environ.get("OHLC_SOURCE"),
+        help="Data source (default: OHLC_SOURCE env or settings.ohlc_source='fmp').",
+    )
 
     args = parser.parse_args()
 
@@ -120,7 +133,10 @@ def main() -> None:
         print("No symbols to refresh.")
         sys.exit(0)
 
-    _refresh(symbols=symbols, timeframe=args.timeframe, start=args.start, dry_run=args.dry_run)
+    _refresh(
+        symbols=symbols, timeframe=args.timeframe, start=args.start,
+        dry_run=args.dry_run, source=args.source,
+    )
 
 
 if __name__ == "__main__":

@@ -43,7 +43,8 @@ def _auto_refresh_if_needed(
   end_date,
 ) -> None:
   """Ensure DB covers the requested [start_date, end_date] window for this
-  symbol/timeframe; fetch from yfinance if either end is missing.
+  symbol/timeframe; fetch via the configured OHLC source if either end is
+  missing.
 
   Branches:
     - No bars at all                         → full fetch (start_date → today)
@@ -54,7 +55,8 @@ def _auto_refresh_if_needed(
   Best-effort: failures are logged and swallowed so the run can still
   proceed against whatever data exists.
   """
-  from background.tasks.market_refresh import fetch_and_upsert, _TF_MAP
+  from background.tasks.market_refresh import _TF_MAP
+  from background.tasks.ohlc_dispatch import fetch_and_upsert_any
 
   if timeframe not in _TF_MAP:
     return  # not a refresh-pipeline timeframe (e.g. "5m")
@@ -85,7 +87,7 @@ def _auto_refresh_if_needed(
     hour=0, minute=0, second=0, microsecond=0
   )
 
-  # Cap target_end at today — yfinance can't return future bars.
+  # Cap target_end at today — no source can return future bars.
   target_end = min(_parse_date(end_date, today_utc), today_utc)
   # target_start is only used to force a backfill when requested window
   # starts earlier than what we have.
@@ -115,7 +117,7 @@ def _auto_refresh_if_needed(
       "auto-refresh: %s %s — earliest=%s latest=%s target=[%s→%s] start=%s",
       symbol, timeframe, earliest, latest, target_start, target_end, force_start,
     )
-    fetch_and_upsert(symbol=symbol, timeframe=timeframe, start=force_start)
+    fetch_and_upsert_any(symbol=symbol, timeframe=timeframe, start=force_start)
   except Exception as exc:
     logger.warning(
       "auto-refresh %s %s failed: %s — proceeding with existing data",
@@ -280,8 +282,9 @@ def run_backtest(self: Task, run_id: str) -> None:
       if not symbol:
         raise ValueError("No symbol provided in backtest settings")
 
-      # Auto-fetch from yfinance if DB doesn't fully cover the requested
-      # [start_date, end_date] window. Best-effort — failures are swallowed.
+      # Auto-fetch from the configured OHLC source (FMP or yfinance) if DB
+      # doesn't fully cover the requested [start_date, end_date] window.
+      # Best-effort — failures are swallowed.
       _auto_refresh_if_needed(
         symbol=symbol,
         timeframe=timeframe,
