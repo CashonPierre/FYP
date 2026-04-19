@@ -2167,16 +2167,17 @@
           <div class="text-xs font-medium text-muted-foreground">Templates</div>
           <div class="text-xs text-muted-foreground">{visibleTemplates.length}</div>
         </div>
-        <div class="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
+        <div class="space-y-1.5 max-h-[360px] overflow-y-auto pr-1">
           {#each visibleTemplates as t (t.id)}
-            <Button
-              class="w-full justify-start text-xs h-8"
-              variant="outline"
+            <button
+              type="button"
+              class="w-full rounded-md border bg-background px-3 py-2 text-left hover:bg-accent transition-colors"
               onclick={() => applyTemplate(t.id)}
               title={t.description}
             >
-              {t.name}
-            </Button>
+              <div class="text-sm font-medium">{t.name}</div>
+              <div class="mt-0.5 text-xs text-muted-foreground line-clamp-2 group-hover:line-clamp-none">{t.description}</div>
+            </button>
           {/each}
         </div>
       </div>
@@ -2292,24 +2293,10 @@
 
         {#if nodes.length === 0}
           <div class="pointer-events-none absolute inset-0 grid place-items-center p-6">
-            <div class="pointer-events-auto w-full max-w-md space-y-3 text-center">
-              <div class="space-y-1">
-                <div class="text-sm font-medium">Drop your first block</div>
-                <div class="text-xs text-muted-foreground">
-                  Drag from the palette or start from a template.
-                </div>
-              </div>
-              <div class="grid gap-2 max-h-[360px] overflow-y-auto">
-                {#each visibleTemplates.slice(0, 6) as t (t.id)}
-                  <button
-                    type="button"
-                    class="rounded-md border bg-background p-3 text-left text-xs transition-colors hover:bg-accent"
-                    onclick={() => applyTemplate(t.id)}
-                  >
-                    <div class="text-sm font-medium">{t.name}</div>
-                    <div class="mt-0.5 text-muted-foreground">{t.description}</div>
-                  </button>
-                {/each}
+            <div class="space-y-1 text-center">
+              <div class="text-sm font-medium">Drop your first block</div>
+              <div class="text-xs text-muted-foreground">
+                Drag from the palette or pick a template on the left.
               </div>
             </div>
           </div>

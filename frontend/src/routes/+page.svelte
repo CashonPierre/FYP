@@ -18,6 +18,7 @@
     <a href="/" class="font-semibold tracking-tight">Quant Backtester</a>
     <div class="flex items-center gap-3">
       {#if loggedIn}
+        <Button variant="ghost" onclick={() => goto('/app/docs')}>Docs</Button>
         <Button onclick={() => goto('/app/backtests/new')}>Open app</Button>
       {:else}
         <Button variant="ghost" onclick={() => goto('/login')}>Log in</Button>
@@ -36,8 +37,9 @@
           Build and backtest trading strategies — visually.
         </h1>
         <p class="text-lg text-muted-foreground">
-          Drag-and-drop strategy blocks, run them against historical market data,
-          and analyse results with candlestick charts, equity curves, and trade tables.
+          Drag-and-drop blocks — indicators, conditions, risk, and sizing — run them on real historical data,
+          and review the equity curve, trade log, and metrics. Works across single assets, multi-asset batches,
+          factor universes, and your own uploaded data.
         </p>
         <div class="flex flex-wrap items-center gap-3 pt-1">
           <Button size="lg" onclick={primaryCta}>
@@ -87,9 +89,9 @@
         <h2 class="text-2xl font-semibold tracking-tight">How it works</h2>
         <div class="mt-8 grid gap-6 sm:grid-cols-3">
           {#each [
-            { step: '1', title: 'Build', body: 'Drop trigger, indicator, and action blocks onto the canvas and wire them together.' },
-            { step: '2', title: 'Backtest', body: 'Pick a symbol and date range, then run your strategy against real historical OHLC data.' },
-            { step: '3', title: 'Analyse', body: 'Review equity curve, trade log, and metrics like Sharpe, drawdown, and win rate.' },
+            { step: '1', title: 'Build', body: 'Drop triggers, indicators, conditions, risk, and sizing blocks onto the canvas — or start from one of 20 ready-made templates.' },
+            { step: '2', title: 'Backtest', body: 'Pick a single symbol, a multi-asset batch, a factor universe, or your own uploaded dataset. Run against historical OHLC data.' },
+            { step: '3', title: 'Analyse', body: 'Review the equity curve vs. benchmark, per-trade log, and metrics: Sharpe, Sortino, max drawdown, CAGR, Calmar, win rate.' },
           ] as item (item.step)}
             <div class="rounded-lg border bg-background p-5">
               <div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
@@ -105,26 +107,57 @@
 
     <section class="px-6 py-14">
       <div class="mx-auto max-w-5xl">
-        <h2 class="text-2xl font-semibold tracking-tight">What you get</h2>
-        <div class="mt-8 grid gap-6 sm:grid-cols-3">
+        <h2 class="text-2xl font-semibold tracking-tight">What's in the box</h2>
+        <div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           <div class="space-y-2">
-            <div class="text-sm font-semibold">Visual strategy builder</div>
+            <div class="text-sm font-semibold">Four asset modes</div>
             <p class="text-sm text-muted-foreground">
-              No code. Connect blocks on a canvas to express entry, exit, and sizing rules.
+              Single symbol, multi-symbol batch, cross-sectional factor universe, or your own uploaded data (BYOD).
             </p>
           </div>
           <div class="space-y-2">
-            <div class="text-sm font-semibold">Historical market data</div>
+            <div class="text-sm font-semibold">15+ indicators</div>
             <p class="text-sm text-muted-foreground">
-              S&amp;P 500 daily OHLC bars from 2013–2018, stored in TimescaleDB for fast queries.
+              SMA, EMA, RSI, MACD, Bollinger, ATR, Stochastic, ROC, Williams %R, CCI, KDJ, MFI, OBV, KST, Volume — every one documented.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <div class="text-sm font-semibold">Flexible sizing</div>
+            <p class="text-sm text-muted-foreground">
+              Buy by units, % of equity, or fixed dollar. Sell all, partial %, or fixed units. Attach StopLoss, TakeProfit, and TrailingStop.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <div class="text-sm font-semibold">Factor strategies</div>
+            <p class="text-sm text-muted-foreground">
+              Rank a universe by Momentum, Reversal, Low-Vol, or Liquidity. Long-only or long/short dollar-neutral with scheduled rebalance.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <div class="text-sm font-semibold">Bring your own data</div>
+            <p class="text-sm text-muted-foreground">
+              Upload CSV bars for any symbol and run the same strategies you'd run on built-in market data.
             </p>
           </div>
           <div class="space-y-2">
             <div class="text-sm font-semibold">Results dashboard</div>
             <p class="text-sm text-muted-foreground">
-              Candlestick chart with buy/sell markers, equity curve, and per-trade breakdown.
+              Candlestick chart with buy/sell markers, equity curve vs. benchmark, Sharpe / Sortino / drawdown / CAGR / Calmar, full trade log.
             </p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="border-t bg-muted/30 px-6 py-14">
+      <div class="mx-auto max-w-5xl text-center">
+        <h2 class="text-2xl font-semibold tracking-tight">Documented every step</h2>
+        <p class="mx-auto mt-3 max-w-2xl text-sm text-muted-foreground">
+          Every node in the palette has a "?" icon that opens a reference page covering its inputs, outputs, parameters,
+          and example use. New users can load a template and trace through the graph with the docs side-by-side.
+        </p>
+        <div class="mt-6">
+          <Button variant="outline" onclick={() => goto('/app/docs')}>Browse docs</Button>
         </div>
       </div>
     </section>
