@@ -16,6 +16,8 @@ FYP/
 ├── TODO.md           ← MVP checklist
 ├── BACKEND_PLAN.md   ← Detailed backend design doc
 ├── UI_PLAN.md        ← Detailed frontend design doc
+├── EVALUATION.md     ← How the system is validated: tests, benchmarks, limitations
+├── DEPLOYMENT.md     ← Production topology (Vercel + Railway + Timescale Cloud)
 └── CHANGES.md        ← Non-obvious change log
 ```
 
@@ -44,18 +46,34 @@ backend/
 │   │   └── schemas.py         ← OhlcBar response schema
 │   │
 │   ├── backtests/             ← Backtest job endpoints
-│   │   ├── route.py           ← POST /backtests, GET /backtests,
-│   │   │                        GET /backtests/{id}/status, GET /backtests/{id}/results
-│   │   ├── schemas.py         ← BacktestCreate, BacktestResults, ResultSummary, etc.
+│   │   ├── route.py           ← POST /backtests (single), POST /backtests/batch (fan-out),
+│   │   │                        POST /backtests/sweep (parameter grid), GET list,
+│   │   │                        GET /backtests/{id}/status, GET /backtests/{id}/results,
+│   │   │                        POST /backtests/compare
+│   │   ├── schemas.py         ← BacktestCreate, BacktestResults, BatchCreate, SweepCreate
 │   │   └── repositories.py    ← DB queries (create_backtest_run, get_run_by_id, etc.)
 │   │
-│   └── user/                  ← User profile endpoints (empty, not yet implemented)
+│   ├── strategies/            ← Saved strategy graphs (persistent templates)
+│   │   ├── route.py           ← CRUD (POST / GET / PATCH / DELETE /strategies)
+│   │   └── schemas.py         ← StrategyCreate, StrategyOut
+│   │
+│   └── user/                  ← User datasets (BYO OHLC upload) + profile
+│       └── datasets.py        ← POST /user/datasets (CSV), GET /user/datasets
 │
 ├── background/                ← Celery async task workers
 │   ├── celery_app.py          ← Celery app config (broker = Valkey/Redis)
 │   └── tasks/
-│       └── email.py           ← send_email Celery task (used for email verification)
-│                                TODO: add run_backtest task here
+│       ├── backtest.py                 ← run_backtest — single strategy, full engine flow
+│       ├── graph_strategy.py           ← GraphStrategy — topological eval of a node graph;
+│       │                                 adapts a user graph into the engine's Strategy ABC
+│       ├── cross_sectional.py          ← Momentum / Value factor rankings for universe runs
+│       ├── ohlc_dispatch.py            ← Ad-hoc refresh router (picks yfinance or FMP)
+│       ├── market_refresh.py           ← yfinance OHLC fetcher (primary, free)
+│       ├── market_refresh_fmp.py       ← Financial Modeling Prep OHLC fetcher (fallback)
+│       ├── fundamentals_refresh.py     ← yfinance fundamentals (~5 recent quarters)
+│       ├── fundamentals_refresh_fmp.py ← FMP fundamentals (30+ yr history)
+│       ├── _perf_metrics.py            ← Sharpe/Sortino/Calmar/max-DD/vol pure functions
+│       └── email.py                    ← verification emails
 │
 ├── common/                    ← Shared utilities used across the app
 │   ├── enums/                 ← Enum definitions (PayloadEnum, RequestEnum, etc.)
@@ -73,12 +91,16 @@ backend/
 │   ├── make_db.py             ← SQLAlchemy engine + session factory + Base class
 │   │                            get_session() is the FastAPI dependency for DB access
 │   └── models/                ← SQLAlchemy ORM table definitions
-│       ├── users.py           ← User table (id, username, email, hashed_password, is_verified)
-│       ├── ohlc_bars.py       ← OhlcBar hypertable (symbol, timeframe, time, OHLCV)
-│       ├── strategies.py      ← Strategy table (user_id, name, graph_json)
-│       ├── backtest_runs.py   ← BacktestRun table (status, settings_json, timestamps)
-│       ├── run_metrics.py     ← RunMetrics table (return, drawdown, sharpe, etc.)
-│       └── trades.py          ← Trade table (run_id, time, side, price, qty)
+│       ├── users.py                   ← User (id, username, email, hashed_password, is_verified)
+│       ├── ohlc_bars.py               ← OhlcBar hypertable (symbol, timeframe, time, OHLCV)
+│       ├── fundamental_snapshots.py   ← FundamentalSnapshot (point-in-time EPS/ROE/etc.)
+│       ├── user_datasets.py           ← UserDataset (BYOD uploaded OHLC namespace)
+│       ├── strategies.py              ← Strategy (user_id, name, graph_json)
+│       ├── backtest_runs.py           ← BacktestRun (status, settings_json, batch_id, timestamps)
+│       ├── backtest_batches.py        ← BacktestBatch (fan-out/sweep parent record)
+│       ├── run_metrics.py             ← RunMetrics (return, DD, sharpe, sortino, calmar, …)
+│       ├── equity_points.py           ← EquityPoint (per-bar NAV for the equity curve)
+│       └── trades.py                  ← Trade (run_id, time, side, price, qty)
 │
 ├── middlewares/               ← FastAPI middleware
 │   ├── logging_middleware.py  ← Logs every request/response
@@ -148,22 +170,24 @@ frontend/src/
     ├── forget-password/
     │   └── +page.svelte       ← Forgot password UI (mocked, no backend yet)
     │
-    ├── app/                   ← Main app (auth-guarded, needs JWT)
-    │   ├── +layout.svelte     ← App shell layout with nav
-    │   ├── +page.svelte       ← /app → redirects to /app/backtests/new
-    │   │
-    │   └── backtests/
-    │       ├── +page.svelte           ← /app/backtests — run history (placeholder)
-    │       ├── new/
-    │       │   └── +page.svelte       ← /app/backtests/new — MAIN BUILDER UI
-    │       │                            Drag-drop canvas, palette, inspector, mock run
-    │       └── [id]/
-    │           └── +page.svelte       ← /app/backtests/[id] — results page
-    │                                    KPIs, candlestick chart, equity curve (mock data)
-    │
-    └── backtest/              ← Old backtest routes (pre-app scaffold, mostly unused)
-        ├── input/             ← Old simple form input (superseded by /app/backtests/new)
-        └── results/           ← Old results page (superseded by /app/backtests/[id])
+    └── app/                   ← Main app (auth-guarded, needs JWT)
+        ├── +layout.svelte     ← App shell layout with nav
+        ├── +page.svelte       ← /app → redirects to /app/backtests/new
+        │
+        ├── backtests/
+        │   ├── +page.svelte           ← History list (skeleton loader + empty state)
+        │   ├── new/                   ← MAIN BUILDER: drag-drop canvas + palette + inspector
+        │   │   └── +page.svelte       ← Wired to POST /backtests, subscribes to /status
+        │   ├── [id]/
+        │   │   └── +page.svelte       ← Results — KPIs, candles, equity curve, trades table
+        │   ├── batch/                 ← Fan-out one strategy across a symbol universe
+        │   ├── compare/               ← Side-by-side comparison of selected runs
+        │   └── sweep/                 ← Parameter grid sweep UI
+        │
+        ├── strategies/                ← Saved strategy graphs (CRUD, search, open-in-builder)
+        ├── datasets/                  ← User-uploaded OHLC CSV datasets
+        ├── settings/                  ← Profile + theme
+        └── docs/                      ← In-app node reference ("What does each node do?")
 ```
 
 ---
@@ -226,19 +250,32 @@ repositories.py — SQL queries via SQLAlchemy
 PostgreSQL + TimescaleDB (Docker)
 ```
 
-**For backtest execution (future):**
+**For backtest execution (live path):**
 ```
-POST /backtests
-  │
+POST /backtests {symbol, timeframe, dates, capital, graph_json}
+  │  FastAPI route creates BacktestRun row (status=queued), returns id
   ▼
-Celery task (background/tasks/backtest.py) — TODO
-  │
+Celery task run_backtest (background/tasks/backtest.py)
+  │  status → running
+  │  loads OHLC via DBMarketDataSource (auto-fetches from yfinance/FMP
+  │  if the requested window isn't covered in ohlc_bars)
+  │  wraps the user's graph_json in GraphStrategy (graph_strategy.py)
+  │     └─ topological sort of nodes
+  │     └─ per-bar: OnBar → indicators/fundamentals → math → conditions → orders
   ▼
-trading_engine (run loop)
-  │  reads market data from ohlc_bars
+trading_engine Engine loop
+  │  MarketDataEvent → StrategyHandler → Signal → OrderManager → FillEvent
+  │  PositionManager tracks holdings, NAV mark-to-market each bar
   ▼
-Results stored in run_metrics + trades tables
-  │
+Persistence
+  │  RunMetrics: total_return, Sharpe, Sortino, Calmar, max_DD, win_rate …
+  │  EquityPoint: NAV per bar (drives the equity curve chart)
+  │  Trade: every fill
+  │  BacktestRun: status=completed
   ▼
-GET /backtests/{id}/results → Frontend
+GET /backtests/{id}/results → Frontend renders KPIs + charts + trades
 ```
+
+**For batch / sweep runs** the route creates a `BacktestBatch` parent row and fans
+out N `BacktestRun` children (one per symbol or parameter combo) into Celery in
+parallel. The compare page joins their metrics via `POST /backtests/compare`.
