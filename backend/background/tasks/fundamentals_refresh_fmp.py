@@ -9,10 +9,18 @@ single call (yfinance only returns ~5 recent quarters — insufficient for any
 backtest window). Filing date comes back on the response, so
 `available_from` is the actual SEC filing date rather than a 45-day heuristic.
 
-Endpoints used (v3):
-  /income-statement/{symbol}?period=quarter&limit=N
-  /balance-sheet-statement/{symbol}?period=quarter&limit=N
-  /historical-price-full/stock_dividend/{symbol}
+Endpoints used (FMP "stable" API — v3 is deprecated since 2025-08-31 and
+returns 403 "Error Message: Legacy Endpoint" for keys issued after that date):
+  GET /stable/income-statement?symbol=SYM&period=quarter&limit=N
+  GET /stable/balance-sheet-statement?symbol=SYM&period=quarter&limit=N
+  GET /stable/dividends?symbol=SYM
+
+Field-name changes vs. v3 that affect parsing:
+  fillingDate (v3 typo)       → filingDate
+  epsdiluted                  → epsDiluted
+  commonStockSharesOutstanding (balance sheet) — NOT returned on /stable.
+  Shares fall back to income statement's weightedAverageShsOutDil /
+  weightedAverageShsOut, which is all we need for per-share ratios.
 
 Tasks:
   fetch_fundamentals_fmp(symbol, session=None, limit=120, filing_lag_days=45)
@@ -27,7 +35,6 @@ Tasks:
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -42,7 +49,7 @@ from database.models import FundamentalSnapshot
 
 logger = get_logger()
 
-_FMP_BASE = "https://financialmodelingprep.com/api/v3"
+_FMP_BASE = "https://financialmodelingprep.com/stable"
 _HTTP_TIMEOUT = 30.0
 
 
@@ -50,7 +57,9 @@ def _fmp_get(path: str, **params: Any) -> list[dict]:
   """GET /{path}; returns the decoded JSON (always a list for these endpoints).
 
   Raises httpx.HTTPStatusError on 4xx/5xx so the caller can decide whether to
-  retry or skip the symbol.
+  retry or skip the symbol. FMP sometimes returns {"Error Message": "..."}
+  with a 200 status on quota / auth failures — we surface those as RuntimeError
+  so Celery retries engage.
   """
   api_key = settings.fmp_api_key
   if not api_key:
@@ -63,8 +72,6 @@ def _fmp_get(path: str, **params: Any) -> list[dict]:
   r = httpx.get(url, params=all_params, timeout=_HTTP_TIMEOUT)
   r.raise_for_status()
   data = r.json()
-  # FMP returns {} or {"Error Message": "..."} on some auth / quota failures
-  # even with a 200 status. Surface them as a hard failure so retries engage.
   if isinstance(data, dict) and "Error Message" in data:
     raise RuntimeError(f"FMP error for {path}: {data['Error Message']}")
   if not isinstance(data, list):
@@ -77,7 +84,6 @@ def _parse_date(s: str | None) -> datetime | None:
   if not s:
     return None
   try:
-    # Allow both date-only and datetime forms
     dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
   except ValueError:
     try:
@@ -93,12 +99,9 @@ def _safe_float(v: Any) -> float | None:
   if v is None:
     return None
   try:
-    f = float(v)
+    return float(v)
   except (TypeError, ValueError):
     return None
-  # FMP uses 0 as "unknown" in a couple of older rows; we keep zeros as-is
-  # because suppressing them breaks legitimate zero balances (e.g. zero debt).
-  return f
 
 
 def _safe_div(a: float | None, b: float | None) -> float | None:
@@ -125,8 +128,8 @@ def fetch_fundamentals_fmp(
   symbol : str
   session : SQLAlchemy Session, optional — opened + closed internally when None.
   limit : int — max quarters per endpoint (FMP caps around 120 = 30 years).
-  filing_lag_days : int — used as fallback for `available_from` when FMP's
-      `fillingDate` field is absent (rare for US listings).
+  filing_lag_days : int — fallback for `available_from` when FMP's
+      `filingDate` field is absent (rare for US listings).
   """
   own_session = session is None
   if own_session:
@@ -134,32 +137,33 @@ def fetch_fundamentals_fmp(
 
   try:
     income = _fmp_get(
-      f"/income-statement/{symbol}", period="quarter", limit=limit,
+      "/income-statement", symbol=symbol, period="quarter", limit=limit,
     )
     balance = _fmp_get(
-      f"/balance-sheet-statement/{symbol}", period="quarter", limit=limit,
+      "/balance-sheet-statement", symbol=symbol, period="quarter", limit=limit,
     )
-    div_resp = _fmp_get(f"/historical-price-full/stock_dividend/{symbol}")
-    # FMP dividend endpoint wraps in {"symbol": ..., "historical": [...]};
-    # _fmp_get returns [] for non-list responses, so handle both shapes.
-    if isinstance(div_resp, list):
-      dividends = div_resp
-    else:
-      dividends = []
+    div_resp = _fmp_get("/dividends", symbol=symbol)
 
-    # Index balance sheet and dividends by period_end date for O(1) lookup.
     balance_by_date: dict[str, dict] = {
       (r.get("date") or "")[:10]: r for r in balance
     }
-    # Dividends: list of {"date": "YYYY-MM-DD", "dividend": float}
-    # For quarterly aggregation we need them sorted ascending.
+    # /stable/dividends returns a flat list of {date, dividend, adjDividend,...}.
+    # We keep the dict-with-"historical" fallback in case FMP ever wraps the
+    # shape again (the v3 endpoint used to).
+    if isinstance(div_resp, list):
+      dividends = div_resp
+    elif isinstance(div_resp, dict):
+      dividends = div_resp.get("historical") or []
+    else:
+      dividends = []
+
     div_rows = sorted(
       [
-        {"date": _parse_date((d.get("date") or "")[:10]), "amount": _safe_float(d.get("dividend"))}
-        for d in (
-          dividends if isinstance(dividends, list)
-          else dividends.get("historical", [])  # just in case the shape changes
-        )
+        {
+          "date": _parse_date((d.get("date") or "")[:10]),
+          "amount": _safe_float(d.get("dividend")),
+        }
+        for d in dividends
       ],
       key=lambda d: d["date"] or datetime.min.replace(tzinfo=timezone.utc),
     )
@@ -176,13 +180,22 @@ def fetch_fundamentals_fmp(
       if period_end is None:
         continue
 
-      # Prefer FMP's reported filing date over our 45d heuristic when present.
-      filing_date = _parse_date(inc.get("fillingDate") or inc.get("filingDate"))
-      available_from = filing_date or (period_end + timedelta(days=filing_lag_days))
+      # Prefer FMP's reported filing date over our filing_lag heuristic when
+      # present. /stable uses `filingDate`; we accept the v3 typo `fillingDate`
+      # as a fallback in case a caller pins the legacy endpoint.
+      filing_date = _parse_date(
+        inc.get("filingDate") or inc.get("fillingDate")
+      )
+      available_from = filing_date or (
+        period_end + timedelta(days=filing_lag_days)
+      )
 
       revenue = _safe_float(inc.get("revenue"))
       net_income = _safe_float(inc.get("netIncome"))
-      diluted_eps = _safe_float(inc.get("epsdiluted") or inc.get("eps"))
+      # /stable uses camelCase `epsDiluted`; keep v3 `epsdiluted` as fallback.
+      diluted_eps = _safe_float(
+        inc.get("epsDiluted") or inc.get("epsdiluted") or inc.get("eps")
+      )
 
       bs = balance_by_date.get(period_end.strftime("%Y-%m-%d"), {})
       total_assets = _safe_float(bs.get("totalAssets"))
@@ -197,6 +210,8 @@ def fetch_fundamentals_fmp(
           if bs else None
         )
       )
+      # /stable balance sheet no longer returns commonStockSharesOutstanding,
+      # so we rely on weighted-avg diluted / basic from the income statement.
       shares_raw = _safe_float(
         bs.get("commonStockSharesOutstanding")
         or inc.get("weightedAverageShsOutDil")
@@ -204,8 +219,9 @@ def fetch_fundamentals_fmp(
       )
       shares_outstanding = int(shares_raw) if shares_raw is not None else None
 
-      # Dividends inside the quarter ending at `period_end`.
-      q_start = period_end - timedelta(days=92)  # ~3 months, captures fiscal quarter
+      # Dividends inside the quarter ending at `period_end`. ~92d window
+      # captures a full fiscal quarter without bleeding into the next one.
+      q_start = period_end - timedelta(days=92)
       dps: float | None = None
       in_q = [
         d["amount"] for d in div_rows
@@ -216,7 +232,7 @@ def fetch_fundamentals_fmp(
       if in_q:
         dps = float(sum(in_q))
 
-      # Derived scalars — annualise ROE from single quarter net income.
+      # Annualise ROE from a single quarter's net income.
       roe = _safe_div(
         (net_income * 4) if net_income is not None else None, total_equity,
       )
