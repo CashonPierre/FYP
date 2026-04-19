@@ -748,7 +748,7 @@
     }
 
     if (factors.length === 0) {
-      issues.push({ level: 'error', message: 'Add a factor block (Momentum, Reversal, Low Vol, or Liquidity).' });
+      issues.push({ level: 'error', message: 'Add a factor block (Momentum, Reversal, Low Vol, Liquidity, or Value).' });
     } else if (factors.length > 1) {
       issues.push({ level: 'error', message: 'Universe mode supports only one factor block.' });
     }
@@ -1278,6 +1278,14 @@
       'MFI',
       'OBV',
       'KST',
+      'PE',
+      'EPS',
+      'ROE',
+      'DividendYield',
+      'Add',
+      'Subtract',
+      'Multiply',
+      'Divide',
       'And',
       'Or',
       'Not',
@@ -1297,6 +1305,7 @@
       'Reversal',
       'LowVol',
       'Liquidity',
+      'Value',
       'Rank',
     ];
     if (!allowedTypes.includes(type)) return null;
