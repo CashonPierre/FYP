@@ -2183,15 +2183,27 @@
     {/if}
     <div class="p-3 space-y-2">
       {#each (assetMode === 'universe' ? universePalette : palette) as item (item.type)}
-        <button
-          class="w-full rounded-md border bg-background px-3 py-2 text-left hover:bg-accent transition-colors"
-          onclick={() => addNode(item.type)}
-          draggable="true"
-          ondragstart={(e) => onPaletteDragStart(e, item.type)}
-        >
-          <div class="text-sm font-medium">{item.title}</div>
-          <div class="text-xs text-muted-foreground">{item.hint}</div>
-        </button>
+        <div class="group relative">
+          <button
+            class="w-full rounded-md border bg-background px-3 py-2 pr-8 text-left hover:bg-accent transition-colors"
+            onclick={() => addNode(item.type)}
+            draggable="true"
+            ondragstart={(e) => onPaletteDragStart(e, item.type)}
+          >
+            <div class="text-sm font-medium">{item.title}</div>
+            <div class="text-xs text-muted-foreground">{item.hint}</div>
+          </button>
+          <a
+            href={`/app/docs#node-${item.type}`}
+            target="_blank"
+            rel="noopener"
+            title={`${item.title} — open docs`}
+            aria-label={`${item.title} docs`}
+            class="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full border bg-background text-[10px] font-semibold text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+          >
+            ?
+          </a>
+        </div>
       {/each}
     </div>
   </section>
