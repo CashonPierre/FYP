@@ -67,8 +67,8 @@ const simpleDca: TemplatePayload = {
         type: 'Buy',
         x: 420,
         y: 80,
-        label: 'Buy',
-        params: { size_type: 'units', amount: 100 },
+        label: 'Buy 5% equity',
+        params: { size_type: 'pct_equity', amount: 5 },
       },
     ],
     edges: [
@@ -87,8 +87,8 @@ const goldenCross: TemplatePayload = {
       { id: 'slow', type: 'SMA', x: 340, y: 220, label: 'SMA 200', params: { period: 200 } },
       { id: 'xup', type: 'IfCrossAbove', x: 640, y: 60, label: 'Cross Above', params: {} },
       { id: 'xdn', type: 'IfCrossBelow', x: 640, y: 220, label: 'Cross Below', params: {} },
-      { id: 'buy', type: 'Buy', x: 940, y: 60, label: 'Buy', params: { amount: 100 } },
-      { id: 'sell', type: 'Sell', x: 940, y: 220, label: 'Sell', params: {} },
+      { id: 'buy', type: 'Buy', x: 940, y: 60, label: 'Buy 100% equity', params: { size_type: 'pct_equity', amount: 100 } },
+      { id: 'sell', type: 'Sell', x: 940, y: 220, label: 'Sell all', params: { size_type: 'all' } },
     ],
     edges: [
       { id: 'e1', source: 'trig', target: 'fast', sourceHandle: 'out', targetHandle: 'in' },
@@ -116,8 +116,8 @@ const rsiMeanReversion: TemplatePayload = {
       { id: 'k70', type: 'Constant', x: 340, y: 280, label: 'Overbought 70', params: { value: 70 } },
       { id: 'lt', type: 'IfBelow', x: 640, y: 60, label: 'RSI < 30', params: {} },
       { id: 'gt', type: 'IfAbove', x: 640, y: 240, label: 'RSI > 70', params: {} },
-      { id: 'buy', type: 'Buy', x: 940, y: 60, label: 'Buy', params: { amount: 100 } },
-      { id: 'sell', type: 'Sell', x: 940, y: 240, label: 'Sell', params: {} },
+      { id: 'buy', type: 'Buy', x: 940, y: 60, label: 'Buy 100% equity', params: { size_type: 'pct_equity', amount: 100 } },
+      { id: 'sell', type: 'Sell', x: 940, y: 240, label: 'Sell all', params: { size_type: 'all' } },
     ],
     edges: [
       { id: 'e1', source: 'trig', target: 'rsi', sourceHandle: 'out', targetHandle: 'in' },
@@ -145,7 +145,7 @@ const macdSignalCross: TemplatePayload = {
       { id: 'macd', type: 'MACD',  x: 340, y: 160, label: 'MACD 12/26/9', params: { fast: 12, slow: 26, signal: 9 } },
       { id: 'xup', type: 'IfCrossAbove', x: 660, y: 60,  label: 'MACD > Signal', params: {} },
       { id: 'xdn', type: 'IfCrossBelow', x: 660, y: 260, label: 'MACD < Signal', params: {} },
-      { id: 'buy',  type: 'Buy',  x: 960, y: 60,  label: 'Buy',  params: { size_type: 'units', amount: 100 } },
+      { id: 'buy',  type: 'Buy',  x: 960, y: 60,  label: 'Buy 100% equity',  params: { size_type: 'pct_equity', amount: 100 } },
       { id: 'sell', type: 'Sell', x: 960, y: 260, label: 'Sell', params: { size_type: 'all' } },
     ],
     edges: [
@@ -659,7 +659,7 @@ const peScreen: TemplatePayload = {
       { id: 'high', type: 'Constant', x: 80, y: 440, label: 'PE > 25', params: { value: 25 } },
       { id: 'ifBuy',  type: 'IfBelow', x: 420, y: 160, label: 'PE < 15?', params: {} },
       { id: 'ifSell', type: 'IfAbove', x: 420, y: 360, label: 'PE > 25?', params: {} },
-      { id: 'buy',  type: 'Buy',  x: 760, y: 160, label: 'Buy 10% equity', params: { size_type: 'pct_equity', amount: 10 } },
+      { id: 'buy',  type: 'Buy',  x: 760, y: 160, label: 'Buy 100% equity', params: { size_type: 'pct_equity', amount: 100 } },
       { id: 'sell', type: 'Sell', x: 760, y: 360, label: 'Sell all', params: { size_type: 'all' } },
     ],
     edges: [
@@ -687,7 +687,7 @@ const dividendScreen: TemplatePayload = {
       { id: 'low',  type: 'Constant', x: 80, y: 440, label: 'Yield < 2%', params: { value: 2 } },
       { id: 'ifBuy',  type: 'IfAbove', x: 420, y: 160, label: 'Yield > 4?', params: {} },
       { id: 'ifSell', type: 'IfBelow', x: 420, y: 360, label: 'Yield < 2?', params: {} },
-      { id: 'buy',  type: 'Buy',  x: 760, y: 160, label: 'Buy 10% equity', params: { size_type: 'pct_equity', amount: 10 } },
+      { id: 'buy',  type: 'Buy',  x: 760, y: 160, label: 'Buy 100% equity', params: { size_type: 'pct_equity', amount: 100 } },
       { id: 'sell', type: 'Sell', x: 760, y: 360, label: 'Sell all', params: { size_type: 'all' } },
     ],
     edges: [
@@ -753,7 +753,7 @@ const epsGrowth: TemplatePayload = {
       { id: 'base', type: 'Constant', x: 80, y: 320, label: 'Baseline EPS', params: { value: 6 } },
       { id: 'ifBuy',  type: 'IfCrossAbove', x: 420, y: 160, label: 'EPS crosses up', params: {} },
       { id: 'ifSell', type: 'IfCrossBelow', x: 420, y: 360, label: 'EPS crosses down', params: {} },
-      { id: 'buy',  type: 'Buy',  x: 760, y: 160, label: 'Buy 10% equity', params: { size_type: 'pct_equity', amount: 10 } },
+      { id: 'buy',  type: 'Buy',  x: 760, y: 160, label: 'Buy 100% equity', params: { size_type: 'pct_equity', amount: 100 } },
       { id: 'sell', type: 'Sell', x: 760, y: 360, label: 'Sell all', params: { size_type: 'all' } },
     ],
     edges: [
