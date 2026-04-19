@@ -1581,3 +1581,115 @@ class TestFundamentalIndicators:
     gs = GraphStrategy(g, fundamentals_df=fund)
     assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
     assert gs.on_event(_event(101.0)).__class__.__name__ == "NullSignal"
+
+
+class TestMathNodes:
+  """Add / Subtract / Multiply / Divide — two number inputs, one number output."""
+
+  def _math_graph(self, op: str, a_val: float, b_val: float) -> dict:
+    """Build: OnBar → IfAbove(a=<op>(A,B), b=Constant(0)) → Buy.
+    A is a Constant(a_val), B is a Constant(b_val).
+    Tests that the math node's output is correctly fed into downstream
+    comparison nodes.
+    """
+    return _make_graph(
+      [_node("ob", "OnBar"),
+       _node("ka", "Constant", {"value": a_val}),
+       _node("kb", "Constant", {"value": b_val}),
+       _node("m",  op),
+       _node("k0", "Constant", {"value": 0}),
+       _node("if", "IfAbove"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if"),
+       _edge("ka", "m",  src_h="out", tgt_h="a"),
+       _edge("kb", "m",  src_h="out", tgt_h="b"),
+       _edge("m",  "if", src_h="out", tgt_h="a"),
+       _edge("k0", "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true", tgt_h="in")],
+    )
+
+  def test_add(self):
+    # 3 + 5 = 8 > 0 → Buy fires
+    gs = GraphStrategy(self._math_graph("Add", 3.0, 5.0))
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    # −3 + (−5) = −8 → Buy suppressed
+    gs2 = GraphStrategy(self._math_graph("Add", -3.0, -5.0))
+    assert gs2.on_event(_event(100.0)).__class__.__name__ == "NullSignal"
+
+  def test_subtract(self):
+    # 10 − 3 = 7 > 0 → Buy
+    gs = GraphStrategy(self._math_graph("Subtract", 10.0, 3.0))
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    # 3 − 10 = −7 → No buy
+    gs2 = GraphStrategy(self._math_graph("Subtract", 3.0, 10.0))
+    assert gs2.on_event(_event(100.0)).__class__.__name__ == "NullSignal"
+
+  def test_multiply(self):
+    # 2 × 3 = 6 > 0 → Buy
+    gs = GraphStrategy(self._math_graph("Multiply", 2.0, 3.0))
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    # 2 × (−3) = −6 → No buy
+    gs2 = GraphStrategy(self._math_graph("Multiply", 2.0, -3.0))
+    assert gs2.on_event(_event(100.0)).__class__.__name__ == "NullSignal"
+
+  def test_divide(self):
+    # 10 / 2 = 5 > 0 → Buy
+    gs = GraphStrategy(self._math_graph("Divide", 10.0, 2.0))
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+    # 10 / (−2) = −5 → No buy
+    gs2 = GraphStrategy(self._math_graph("Divide", 10.0, -2.0))
+    assert gs2.on_event(_event(100.0)).__class__.__name__ == "NullSignal"
+
+  def test_divide_by_zero_returns_none(self):
+    # 10 / 0 → None → IfAbove suppresses → NullSignal
+    gs = GraphStrategy(self._math_graph("Divide", 10.0, 0.0))
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "NullSignal"
+
+  def test_math_chains(self):
+    """(Constant(5) + Constant(3)) × Constant(2) = 16. Tests that math
+    outputs feed other math nodes, not just conditions."""
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("k5", "Constant", {"value": 5}),
+       _node("k3", "Constant", {"value": 3}),
+       _node("k2", "Constant", {"value": 2}),
+       _node("add", "Add"),
+       _node("mul", "Multiply"),
+       _node("k15", "Constant", {"value": 15}),
+       _node("if", "IfAbove"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if"),
+       _edge("k5", "add", src_h="out", tgt_h="a"),
+       _edge("k3", "add", src_h="out", tgt_h="b"),
+       _edge("add", "mul", src_h="out", tgt_h="a"),
+       _edge("k2", "mul", src_h="out", tgt_h="b"),
+       _edge("mul", "if", src_h="out", tgt_h="a"),
+       _edge("k15", "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true", tgt_h="in")],
+    )
+    # 16 > 15 → Buy
+    gs = GraphStrategy(g)
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "AddSignal"
+
+  def test_math_none_propagates(self):
+    """If one input is None (e.g. from PE with negative EPS), output is None."""
+    g = _make_graph(
+      [_node("ob", "OnBar"),
+       _node("pe", "PE"),
+       _node("k2", "Constant", {"value": 2}),
+       _node("mul", "Multiply"),
+       _node("k10", "Constant", {"value": 10}),
+       _node("if", "IfAbove"),
+       _node("buy", "Buy", amount=1.0)],
+      [_edge("ob", "if"),
+       _edge("pe", "mul", src_h="out", tgt_h="a"),
+       _edge("k2", "mul", src_h="out", tgt_h="b"),
+       _edge("mul", "if", src_h="out", tgt_h="a"),
+       _edge("k10", "if", src_h="out", tgt_h="b"),
+       _edge("if", "buy", src_h="true", tgt_h="in")],
+    )
+    # Negative EPS → PE is None → Multiply is None → IfAbove suppresses
+    fund = pd.DataFrame([{"ttm_eps": -2.0, "ttm_div_per_share": None,
+                          "roe": None, "profit_margin": None, "debt_to_equity": None}])
+    gs = GraphStrategy(g, fundamentals_df=fund)
+    assert gs.on_event(_event(100.0)).__class__.__name__ == "NullSignal"

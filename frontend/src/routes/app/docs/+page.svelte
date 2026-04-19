@@ -95,6 +95,17 @@
       ],
     },
     {
+      id: 'sec-math',
+      title: 'Math',
+      blurb: 'Combine numeric signals. Each math node takes two number inputs (A, B) and emits a single number. Chain them to build expressions like "Close − ATR × 2" for dynamic stops or "SMA(20) − SMA(50)" for trend scores.',
+      nodes: [
+        { type: 'Add',      title: 'Add (A + B)',      oneLine: 'Numeric sum of two inputs.', inputs: 'A (number), B (number)', outputs: 'value (number)', detail: 'Symmetric; output is None when either input is None.' },
+        { type: 'Subtract', title: 'Subtract (A − B)', oneLine: 'Numeric difference.', inputs: 'A (number), B (number)', outputs: 'value (number)', detail: 'Asymmetric. Classic use: SMA(20) − SMA(50) feeds into IfAbove against a Constant(0).' },
+        { type: 'Multiply', title: 'Multiply (A × B)', oneLine: 'Numeric product.', inputs: 'A (number), B (number)', outputs: 'value (number)', detail: 'Examples: ATR × 2 for stop distance, Close × Volume for dollar volume.' },
+        { type: 'Divide',   title: 'Divide (A ÷ B)',   oneLine: 'Numeric ratio.', inputs: 'A (number), B (number)', outputs: 'value (number)', detail: 'Emits None when |B| < 1e-12 to protect downstream comparisons from NaN/infinity.' },
+      ],
+    },
+    {
       id: 'sec-conditions',
       title: 'Conditions',
       blurb: 'Turn numbers into events. Each condition takes two numbers (A, B) plus an event gate, and emits true/false events.',

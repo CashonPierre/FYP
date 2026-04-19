@@ -42,6 +42,11 @@
     | 'IfCrossAbove'
     | 'IfCrossBelow'
     | 'Constant'
+    // Math
+    | 'Add'
+    | 'Subtract'
+    | 'Multiply'
+    | 'Divide'
     | 'Buy'
     | 'Sell'
     // Fundamental indicators (require FundamentalSnapshot data)
@@ -115,6 +120,11 @@
     { type: 'EPS', title: 'EPS (TTM)', hint: 'Trailing twelve-month diluted EPS' },
     { type: 'ROE', title: 'ROE', hint: 'Return on equity (latest filing)' },
     { type: 'DividendYield', title: 'Dividend Yield', hint: 'TTM dividend ÷ price (%)' },
+    // Math
+    { type: 'Add',      title: 'Add (A + B)',      hint: 'Numeric sum of two inputs' },
+    { type: 'Subtract', title: 'Subtract (A − B)', hint: 'Numeric difference (A minus B)' },
+    { type: 'Multiply', title: 'Multiply (A × B)', hint: 'Numeric product' },
+    { type: 'Divide',   title: 'Divide (A ÷ B)',   hint: 'Numeric ratio; None when B ≈ 0' },
     // Conditions
     { type: 'IfAbove', title: 'If A > B', hint: 'True while A is above B' },
     { type: 'IfBelow', title: 'If A < B', hint: 'True while A is below B' },
@@ -378,6 +388,17 @@
           inputs: [],
           outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
         };
+      case 'Add':
+      case 'Subtract':
+      case 'Multiply':
+      case 'Divide':
+        return {
+          inputs: [
+            { handle: 'a', label: 'A', type: 'number', y: 18 },
+            { handle: 'b', label: 'B', type: 'number', y: 38 },
+          ],
+          outputs: [{ handle: 'out', label: 'value', type: 'number', y: NODE_DEFAULT_PORT_Y }],
+        };
       case 'Buy':
       case 'Sell':
         return {
@@ -523,6 +544,11 @@
         return { size_type: 'all' };
       case 'Constant':
         return { value: 30 };
+      case 'Add':
+      case 'Subtract':
+      case 'Multiply':
+      case 'Divide':
+        return {};
       case 'Data':
         return { timeframe: '1D' };
       default:
@@ -2889,6 +2915,18 @@
           <p class="text-xs text-muted-foreground">
             Score = TTM EPS ÷ price (earnings yield). Higher = cheaper. Negative earnings rank lowest.
             Requires fundamentals data to be refreshed for the universe.
+          </p>
+        {/if}
+
+        {#if selected.type === 'Add' || selected.type === 'Subtract' || selected.type === 'Multiply' || selected.type === 'Divide'}
+          <p class="text-xs text-muted-foreground">
+            {selected.type === 'Add'
+              ? 'value = A + B. Combines any two numeric outputs (indicators, fundamentals, constants).'
+              : selected.type === 'Subtract'
+                ? 'value = A − B. Classic use: SMA(20) − SMA(50) as a raw trend score.'
+                : selected.type === 'Multiply'
+                  ? 'value = A × B. E.g. ATR × 2 for dynamic stop-loss distance, or Close × Volume for dollar volume.'
+                  : 'value = A ÷ B. None when B ≈ 0 (protects downstream comparisons from NaN).'}
           </p>
         {/if}
 

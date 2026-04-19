@@ -653,6 +653,24 @@ class GraphStrategy:
         else:
           outputs[nid] = {"out": (ttm_div / close) * 100.0}
 
+      # ── Math (Add / Subtract / Multiply / Divide) ─────────────────
+      elif ntype in ("Add", "Subtract", "Multiply", "Divide"):
+        a_val = self._to_float(self._upstream(outputs, nid, "a"), bar)
+        b_val = self._to_float(self._upstream(outputs, nid, "b"), bar)
+        if a_val is None or b_val is None:
+          outputs[nid] = {"out": None}
+        elif ntype == "Add":
+          outputs[nid] = {"out": a_val + b_val}
+        elif ntype == "Subtract":
+          outputs[nid] = {"out": a_val - b_val}
+        elif ntype == "Multiply":
+          outputs[nid] = {"out": a_val * b_val}
+        else:  # Divide
+          if abs(b_val) < 1e-12:
+            outputs[nid] = {"out": None}
+          else:
+            outputs[nid] = {"out": a_val / b_val}
+
       # ── IfAbove ────────────────────────────────────────────────────
       elif ntype == "IfAbove":
         trigger = self._upstream(outputs, nid, "in")
