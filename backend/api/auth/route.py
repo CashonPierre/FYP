@@ -25,6 +25,11 @@ from .schemas import (
 )
 from background.tasks import send_email_task
 from background.tasks.email import send_email
+from .email_templates import (
+    verification_email,
+    reverification_email,
+    password_reset_email,
+)
 from database.make_db import get_session
 from database.models import User
 from .repositories import is_existing_user, get_user_by_email
@@ -74,16 +79,21 @@ def reverify_email(
     verify_url: str = generate_verify_url(
         host_prefix=auth_router.prefix, token=token
     )
+    text_body, html_body = reverification_email(verify_url=verify_url)
 
     if settings.debug:
         send_email(
-            subject="Reverify you email", to_email=db_user.email, body=verify_url
+            subject="Verify your email",
+            to_email=db_user.email,
+            body=text_body,
+            html=html_body,
         )
     else:
         send_email_task.delay(
-            subject="Reverify you email",
+            subject="Verify your email",
             to_email=db_user.email,
-            body=verify_url,
+            body=text_body,
+            html=html_body,
         )
 
     return Response(
@@ -122,16 +132,21 @@ def register(
     verify_url: str = generate_verify_url(
         host_prefix=auth_router.prefix, token=token
     )
+    text_body, html_body = verification_email(verify_url=verify_url)
 
     if settings.debug:
         send_email(
-            subject="Verify your email", to_email=db_user.email, body=verify_url
+            subject="Verify your email",
+            to_email=db_user.email,
+            body=text_body,
+            html=html_body,
         )
     else:
         send_email_task.delay(
             subject="Verify your email",
             to_email=db_user.email,
-            body=verify_url,
+            body=text_body,
+            html=html_body,
         )
 
     return Response(
@@ -211,18 +226,24 @@ def forgot_password(
         )
         token: str = create_jwt_token(data=token_data)
         reset_url: str = generate_reset_url(token=token)
+        text_body, html_body = password_reset_email(
+            reset_url=reset_url,
+            expire_hours=settings.access_token_expire_hour,
+        )
 
         if settings.debug or not settings.resend_api_key:
             send_email(
                 subject="Reset your password",
                 to_email=user.email,
-                body=f"Click here to reset your password:\n\n{reset_url}\n\nThis link expires in {settings.access_token_expire_hour} hours.",
+                body=text_body,
+                html=html_body,
             )
         else:
             send_email_task.delay(
                 subject="Reset your password",
                 to_email=user.email,
-                body=f"Click here to reset your password:\n\n{reset_url}\n\nThis link expires in {settings.access_token_expire_hour} hours.",
+                body=text_body,
+                html=html_body,
             )
 
     return Response(
