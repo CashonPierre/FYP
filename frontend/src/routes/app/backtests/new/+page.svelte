@@ -387,6 +387,12 @@
           outputs: [],
         };
       case 'Data':
+        // Live close of the current bar — emits every bar like Volume/OHLCV
+        // indicators, so no event input is required.
+        return {
+          inputs: [],
+          outputs: [{ handle: 'out', label: 'close', type: 'number', y: NODE_DEFAULT_PORT_Y }],
+        };
       default:
         return { inputs: [], outputs: [] };
     }
@@ -1071,6 +1077,12 @@
     const template = STRATEGY_TEMPLATES.find((t) => t.id === templateId);
     if (!template) return;
     try {
+      // Auto-switch asset mode if the template doesn't belong to the current
+      // mode (e.g. opening a universe template from the single-symbol picker).
+      // Prevents validation from immediately flagging the imported nodes.
+      if (template.modes.length > 0 && !template.modes.includes(assetMode)) {
+        assetMode = template.modes[0];
+      }
       applyImportedPayload(template.payload);
       showTemplates = false;
       toast.success(`Loaded template: ${template.name}`);
@@ -1078,6 +1090,13 @@
       toast.error(err instanceof Error ? err.message : 'Failed to load template');
     }
   };
+
+  // Templates filtered to the currently-selected asset mode.  The picker
+  // is mode-scoped so universe mode sees factor/rank templates and
+  // single/multi/dataset see the indicator-based palette templates.
+  const visibleTemplates = $derived(
+    STRATEGY_TEMPLATES.filter((t) => t.modes.includes(assetMode))
+  );
 
   const isRecord = (v: unknown): v is Record<string, unknown> =>
     typeof v === 'object' && v !== null;
@@ -2003,14 +2022,18 @@
             Loading a template will replace the current canvas. Export or save first if you want to keep it.
           </div>
         {/if}
-        <ul class="space-y-2">
-          {#each STRATEGY_TEMPLATES as t (t.id)}
+        <ul class="space-y-2 max-h-[480px] overflow-y-auto">
+          {#each visibleTemplates as t (t.id)}
             <li class="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
               <div class="min-w-0">
                 <div class="font-medium">{t.name}</div>
                 <div class="text-xs text-muted-foreground">{t.description}</div>
               </div>
               <Button size="sm" onclick={() => applyTemplate(t.id)}>Use</Button>
+            </li>
+          {:else}
+            <li class="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+              No templates available for this mode yet.
             </li>
           {/each}
         </ul>
@@ -2138,19 +2161,24 @@
       <h2 class="font-semibold">Blocks</h2>
       <p class="text-xs text-muted-foreground">Drag to canvas (or click).</p>
     </div>
-    {#if assetMode !== 'universe'}
+    {#if visibleTemplates.length > 0}
       <div class="border-b p-3 space-y-2">
-        <div class="text-xs font-medium text-muted-foreground">Templates</div>
-        {#each STRATEGY_TEMPLATES as t (t.id)}
-          <Button
-            class="w-full justify-start"
-            variant="outline"
-            onclick={() => applyTemplate(t.id)}
-            title={t.description}
-          >
-            {t.name}
-          </Button>
-        {/each}
+        <div class="flex items-center justify-between">
+          <div class="text-xs font-medium text-muted-foreground">Templates</div>
+          <div class="text-xs text-muted-foreground">{visibleTemplates.length}</div>
+        </div>
+        <div class="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
+          {#each visibleTemplates as t (t.id)}
+            <Button
+              class="w-full justify-start text-xs h-8"
+              variant="outline"
+              onclick={() => applyTemplate(t.id)}
+              title={t.description}
+            >
+              {t.name}
+            </Button>
+          {/each}
+        </div>
       </div>
     {/if}
     <div class="p-3 space-y-2">
@@ -2259,8 +2287,8 @@
                   Drag from the palette or start from a template.
                 </div>
               </div>
-              <div class="grid gap-2">
-                {#each STRATEGY_TEMPLATES as t (t.id)}
+              <div class="grid gap-2 max-h-[360px] overflow-y-auto">
+                {#each visibleTemplates.slice(0, 6) as t (t.id)}
                   <button
                     type="button"
                     class="rounded-md border bg-background p-3 text-left text-xs transition-colors hover:bg-accent"
