@@ -7,6 +7,7 @@
   import { Input } from '$lib/components/ui/input/index.js';
   import { Label } from '$lib/components/ui/label/index.js';
   import { BACKEND } from '$lib/config.js';
+  import { resetTour, startTour } from '$lib/onboarding/tour.js';
 
   type Profile = {
     username: string;
@@ -140,6 +141,13 @@
     goto('/login');
   };
 
+  const replayTour = () => {
+    resetTour();
+    goto('/app/backtests/new').then(() => {
+      requestAnimationFrame(() => startTour());
+    });
+  };
+
   onMount(loadProfile);
 </script>
 
@@ -234,7 +242,17 @@
   </Card.Root>
 </div>
 
-<div class="mt-6">
+<div class="mt-6 grid gap-6 md:grid-cols-2">
+  <Card.Root class="border">
+    <Card.Header>
+      <Card.Title class="text-base">Help</Card.Title>
+      <Card.Description>Replay the builder walkthrough anytime.</Card.Description>
+    </Card.Header>
+    <Card.CardContent class="flex justify-end pb-6">
+      <Button variant="outline" size="sm" onclick={replayTour}>Replay tour</Button>
+    </Card.CardContent>
+  </Card.Root>
+
   <Card.Root class="border">
     <Card.Header>
       <Card.Title class="text-base">Session</Card.Title>

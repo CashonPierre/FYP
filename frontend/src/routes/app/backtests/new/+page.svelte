@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
+  import { startTourIfUnseen } from '$lib/onboarding/tour.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import { Input } from '$lib/components/ui/input/index.js';
   import { Label } from '$lib/components/ui/label/index.js';
@@ -1345,13 +1346,16 @@
     }
     try {
       const raw = sessionStorage.getItem(IMPORT_KEY);
-      if (!raw) return;
-      applyImportedPayload(JSON.parse(raw));
-      sessionStorage.removeItem(IMPORT_KEY);
-      toast.success('Duplicated into builder');
+      if (raw) {
+        applyImportedPayload(JSON.parse(raw));
+        sessionStorage.removeItem(IMPORT_KEY);
+        toast.success('Duplicated into builder');
+      }
     } catch {
       sessionStorage.removeItem(IMPORT_KEY);
     }
+
+    startTourIfUnseen();
   });
 
 
@@ -1773,7 +1777,9 @@
     >
       Sweep
     </Button>
-    <Button onclick={runBacktest} disabled={nodes.length === 0 || hasErrors}>Run</Button>
+    <span data-tour="run">
+      <Button onclick={runBacktest} disabled={nodes.length === 0 || hasErrors}>Run</Button>
+    </span>
   </div>
 </div>
 
@@ -2211,7 +2217,7 @@
 
 <div class="mt-6 grid gap-4 lg:grid-cols-[280px_1fr_320px]">
   <!-- Palette -->
-  <section class="rounded-lg border bg-card">
+  <section data-tour="palette" class="rounded-lg border bg-card">
     <div class="border-b p-4">
       <h2 class="font-semibold">Blocks</h2>
       <p class="text-xs text-muted-foreground">Drag to canvas (or click).</p>
@@ -2265,7 +2271,7 @@
   </section>
 
   <!-- Canvas -->
-  <section class="rounded-lg border bg-card overflow-hidden">
+  <section data-tour="canvas" class="rounded-lg border bg-card overflow-hidden">
     <div class="border-b p-4 flex items-center justify-between">
       <h2 class="font-semibold">Canvas</h2>
       <div class="text-xs text-muted-foreground">
@@ -2455,7 +2461,7 @@
   </section>
 
   <!-- Inspector -->
-  <section class="rounded-lg border bg-card">
+  <section data-tour="inspector" class="rounded-lg border bg-card">
     <div class="border-b p-4">
       <h2 class="font-semibold">Inspector</h2>
       <p class="text-xs text-muted-foreground">Edit the selected block.</p>
