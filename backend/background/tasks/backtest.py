@@ -262,55 +262,24 @@ def _strategy_from_graph(
 
 
 def _make_engine(initial_cash: float):
-  """
-  Return a patched Engine that handles CloseSignal(order_id=None).
+  """Return a stock trading_engine Engine.
 
-  The engine's default close_position(symbol, order_id=None) calls
-  positions.pop(None) which always returns None, so positions are never
-  closed and portfolio._trades stays empty.
+  Historically this returned a `_PatchedEngine` subclass that rerouted
+  `CloseSignal(order_id=None)` to `close_positions()` because the old
+  engine's `close_position(order_id=None)` silently did nothing. That
+  workaround picked the only close path that did NOT credit cash back,
+  so round-trip strategies flatlined at $0 after their first sell.
 
-  This subclass falls back to close_positions() (close all open positions
-  for the symbol) whenever order_id is None.
+  The stock engine now handles `order_id=None` correctly via
+  `close_position_fifo`, which credits the sell proceeds. Subclassing is
+  no longer needed.
   """
   if ENGINE_PATH not in sys.path:
     sys.path.insert(0, ENGINE_PATH)
 
   from core.engine import Engine
-  from events.event import MarketDataEvent
-  from strategies.signal import CloseSignal
 
-  class _PatchedEngine(Engine):
-    def _run_strategies(self, event):
-      for signal in self._strategy_handler.run_all_strategy(event=event):
-        if isinstance(signal, CloseSignal) and isinstance(event, MarketDataEvent):
-          if signal.order_id is None:
-            # Close ALL open positions for this symbol (handles order_id=None)
-            closed_list = self._positionManager.close_positions(
-              symbol=event.payload.symbol
-            )
-            for closed in closed_list:
-              self._portfolio.add_trade(
-                order_fill=closed,
-                current_price=event.payload.price,
-                exit_timestamp=self._clock.now,
-              )
-          else:
-            closed = self._positionManager.close_position(
-              symbol=event.payload.symbol,
-              order_id=signal.order_id,
-            )
-            if closed:
-              self._portfolio.add_trade(
-                order_fill=closed,
-                current_price=event.payload.price,
-                exit_timestamp=self._clock.now,
-              )
-        else:
-          self._orderManager.handle_signal(
-            signal=signal, time=self._clock.now
-          )
-
-  return _PatchedEngine(initial_cash=initial_cash)
+  return Engine(initial_cash=initial_cash)
 
 
 @celery_worker.task(bind=True, max_retries=0)
