@@ -64,7 +64,7 @@ const simpleDca: TemplatePayload = {
         x: 420,
         y: 80,
         label: 'Buy',
-        params: { amount: 100 },
+        params: { size_type: 'units', amount: 100 },
       },
     ],
     edges: [

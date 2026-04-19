@@ -143,13 +143,16 @@ class _BarRow:
     self.volume = volume
 
 
-def _strategy_from_graph(graph: dict, ohlcv_df=None):
+def _strategy_from_graph(graph: dict, ohlcv_df=None, initial_capital: float = 100000.0):
   """
   Parse a builder graph JSON and return a GraphStrategy instance.
 
   When ohlcv_df is provided (a pandas DataFrame with open/high/low/close/volume
   columns), indicator series are precomputed with pandas_ta upfront so that
   on_event performs O(1) lookups instead of incremental rolling calculations.
+
+  `initial_capital` is forwarded to GraphStrategy so Buy nodes in "pct_equity"
+  sizing mode can resolve the percent against a real dollar basis.
 
   Falls back to DCA(buyframe=1, buy_amount=10) if the graph is empty or
   unparseable, so existing tests and integrations keep working.
@@ -164,7 +167,7 @@ def _strategy_from_graph(graph: dict, ohlcv_df=None):
 
   logger.info("graph parser: building GraphStrategy (%d nodes, %d edges, precompute=%s)",
               len(nodes), len(graph.get("edges", [])), ohlcv_df is not None)
-  return GraphStrategy(graph, ohlcv_df=ohlcv_df)
+  return GraphStrategy(graph, ohlcv_df=ohlcv_df, initial_capital=initial_capital)
 
 
 def _make_engine(initial_cash: float):
@@ -324,7 +327,9 @@ def run_backtest(self: Task, run_id: str) -> None:
       "volume": [b.volume or 0 for b in bars],
     })
 
-    strategy = _strategy_from_graph(graph, ohlcv_df=ohlcv_df)
+    strategy = _strategy_from_graph(
+      graph, ohlcv_df=ohlcv_df, initial_capital=initial_capital,
+    )
     engine.add_strategy(strategy)
 
     # Push market data events one bar at a time so we can snapshot the

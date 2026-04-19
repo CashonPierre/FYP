@@ -483,7 +483,9 @@
       case 'Rank':
         return { top_pct: 0.2, bottom_pct: 0.2, rebalance_days: 21, mode: 'long_only' };
       case 'Buy':
-        return { amount: 10 };
+        return { size_type: 'units', amount: 10 };
+      case 'Sell':
+        return { size_type: 'all' };
       case 'Constant':
         return { value: 30 };
       case 'Data':
@@ -929,56 +931,6 @@
   const issueForSelected = $derived(
     selectedId ? issues.filter((i) => i.nodeId === selectedId) : []
   );
-
-  const loadTemplateSmaCrossover = () => {
-    const onBarId = newId('node');
-    const sma10Id = newId('node');
-    const sma50Id = newId('node');
-    const ifId = newId('node');
-    const buyId = newId('node');
-    const sellId = newId('node');
-
-    nodes = [
-      { id: onBarId, type: 'OnBar', x: 60, y: 80, label: 'OnBar', params: { timeframe: '1D' } },
-      { id: sma10Id, type: 'SMA', x: 320, y: 30, label: 'SMA(10)', params: { period: 10 } },
-      { id: sma50Id, type: 'SMA', x: 320, y: 140, label: 'SMA(50)', params: { period: 50 } },
-      { id: ifId, type: 'IfAbove', x: 600, y: 80, label: 'If SMA10 > SMA50', params: {} },
-      { id: buyId, type: 'Buy', x: 900, y: 40, label: 'Buy', params: {} },
-      { id: sellId, type: 'Sell', x: 900, y: 160, label: 'Sell', params: {} },
-    ];
-
-    edges = [
-      { id: newId('edge'), source: onBarId, sourceHandle: 'out', target: sma10Id, targetHandle: 'in' },
-      { id: newId('edge'), source: onBarId, sourceHandle: 'out', target: sma50Id, targetHandle: 'in' },
-      { id: newId('edge'), source: onBarId, sourceHandle: 'out', target: ifId, targetHandle: 'in' },
-      { id: newId('edge'), source: sma10Id, sourceHandle: 'out', target: ifId, targetHandle: 'a' },
-      { id: newId('edge'), source: sma50Id, sourceHandle: 'out', target: ifId, targetHandle: 'b' },
-      { id: newId('edge'), source: ifId, sourceHandle: 'true', target: buyId, targetHandle: 'in' },
-      { id: newId('edge'), source: ifId, sourceHandle: 'false', target: sellId, targetHandle: 'in' },
-    ];
-
-    pendingSourceId = null;
-    pendingSourceHandle = null;
-    selectedId = ifId;
-  };
-
-  const loadTemplateDCA = () => {
-    const onBarId = newId('node');
-    const buyId = newId('node');
-
-    nodes = [
-      { id: onBarId, type: 'OnBar', x: 60, y: 100, label: 'OnBar', params: { timeframe: '1D' } },
-      { id: buyId, type: 'Buy', x: 340, y: 100, label: 'Buy', params: { amount: 10 } },
-    ];
-
-    edges = [
-      { id: newId('edge'), source: onBarId, sourceHandle: 'out', target: buyId, targetHandle: 'in' },
-    ];
-
-    pendingSourceId = null;
-    pendingSourceHandle = null;
-    selectedId = buyId;
-  };
 
   const getCanvasDropPosition = (event: DragEvent) => {
     const pt = screenToWorld(event.clientX, event.clientY);
@@ -2188,20 +2140,17 @@
     </div>
     {#if assetMode !== 'universe'}
       <div class="border-b p-3 space-y-2">
-        <Button
-          class="w-full"
-          variant="outline"
-          onclick={loadTemplateDCA}
-        >
-          Template: DCA
-        </Button>
-        <Button
-          class="w-full"
-          variant="outline"
-          onclick={loadTemplateSmaCrossover}
-        >
-          Template: SMA10 &gt; SMA50
-        </Button>
+        <div class="text-xs font-medium text-muted-foreground">Templates</div>
+        {#each STRATEGY_TEMPLATES as t (t.id)}
+          <Button
+            class="w-full justify-start"
+            variant="outline"
+            onclick={() => applyTemplate(t.id)}
+            title={t.description}
+          >
+            {t.name}
+          </Button>
+        {/each}
       </div>
     {/if}
     <div class="p-3 space-y-2">
@@ -2749,20 +2698,116 @@
         {/if}
 
         {#if selected.type === 'Buy'}
+          {@const sizeType = String(selected.params.size_type ?? 'units')}
+          {@const amountLabel =
+            sizeType === 'pct_equity'
+              ? 'Percent of initial capital (%)'
+              : sizeType === 'dollar'
+                ? 'Dollar amount ($)'
+                : 'Amount (units)'}
+          {@const amountStep = sizeType === 'units' ? '1' : '0.01'}
+          {@const amountDefault = sizeType === 'pct_equity' ? 10 : sizeType === 'dollar' ? 1000 : 10}
           <div class="space-y-2">
-            <Label for="buyAmount">Amount (units)</Label>
+            <Label for="buySizeType">Sizing</Label>
+            <select
+              id="buySizeType"
+              class="h-9 w-full rounded-md border bg-background px-3 py-1 text-sm"
+              value={sizeType}
+              onchange={(e) => {
+                const next = (e.currentTarget as HTMLSelectElement).value;
+                updateNodeParam(selected.id, 'size_type', next);
+                // Reset amount to a sensible default when mode changes so the
+                // user doesn't end up buying 10% per bar after switching from
+                // "10 units" — different scales, same number is dangerous.
+                const reset = next === 'pct_equity' ? 10 : next === 'dollar' ? 1000 : 10;
+                updateNodeParam(selected.id, 'amount', reset);
+              }}
+            >
+              <option value="units">Units (shares)</option>
+              <option value="pct_equity">% of initial capital</option>
+              <option value="dollar">Dollar amount</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <Label for="buyAmount">{amountLabel}</Label>
             <Input
               id="buyAmount"
               type="number"
-              min="1"
-              step="1"
-              value={String(selected.params.amount ?? 10)}
+              min="0"
+              step={amountStep}
+              value={String(selected.params.amount ?? amountDefault)}
               oninput={(e) => {
                 const v = parseFloat((e.currentTarget as HTMLInputElement).value);
                 if (!isNaN(v) && v > 0) updateNodeParam(selected.id, 'amount', v);
               }}
             />
+            <p class="text-xs text-muted-foreground">
+              {#if sizeType === 'pct_equity'}
+                Quantity is computed from initial capital at entry: floor((capital × pct) / price).
+              {:else if sizeType === 'dollar'}
+                Quantity is floor(amount / price) at entry.
+              {:else}
+                Fixed share count per buy. Effective exposure drifts as equity grows.
+              {/if}
+            </p>
           </div>
+        {/if}
+
+        {#if selected.type === 'Sell'}
+          {@const sellSize = String(selected.params.size_type ?? 'all')}
+          {@const sellAmountLabel =
+            sellSize === 'pct_position' ? 'Percent of position (%)'
+              : sellSize === 'units' ? 'Shares to sell'
+              : null}
+          <div class="space-y-2">
+            <Label for="sellSizeType">Sizing</Label>
+            <select
+              id="sellSizeType"
+              class="h-9 w-full rounded-md border bg-background px-3 py-1 text-sm"
+              value={sellSize}
+              onchange={(e) => {
+                const next = (e.currentTarget as HTMLSelectElement).value;
+                updateNodeParam(selected.id, 'size_type', next);
+                if (next === 'pct_position') updateNodeParam(selected.id, 'amount', 50);
+                else if (next === 'units') updateNodeParam(selected.id, 'amount', 1);
+                else updateNodeParam(selected.id, 'amount', 0);
+              }}
+            >
+              <option value="all">Close entire position</option>
+              <option value="pct_position">% of position</option>
+              <option value="units">Shares (units)</option>
+            </select>
+          </div>
+          {#if sellAmountLabel}
+            <div class="space-y-2">
+              <Label for="sellAmount">{sellAmountLabel}</Label>
+              <Input
+                id="sellAmount"
+                type="number"
+                min="0"
+                step={sellSize === 'units' ? '1' : '0.01'}
+                value={String(selected.params.amount ?? (sellSize === 'pct_position' ? 50 : 1))}
+                oninput={(e) => {
+                  const v = parseFloat((e.currentTarget as HTMLInputElement).value);
+                  if (!isNaN(v) && v > 0) updateNodeParam(selected.id, 'amount', v);
+                }}
+              />
+              <p class="text-xs text-muted-foreground">
+                {#if sellSize === 'pct_position'}
+                  Closes the given fraction of the open position, FIFO.
+                  Useful for scale-out rules (e.g. sell 33% at each target).
+                {:else}
+                  Closes exactly this share count, FIFO. Engine caps at the
+                  current position size if you ask for more.
+                {/if}
+              </p>
+            </div>
+          {:else}
+            <p class="text-xs text-muted-foreground">
+              Closes every open share for this symbol in one go — the legacy
+              "exit" behaviour.
+            </p>
+          {/if}
         {/if}
 
         {#if selected.type === 'Momentum'}

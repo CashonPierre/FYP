@@ -102,7 +102,16 @@ class GraphStrategy:
               on every bar when one is not provided.
   """
 
-  def __init__(self, graph: dict, ohlcv_df=None) -> None:
+  def __init__(
+    self, graph: dict, ohlcv_df=None, initial_capital: float = 100000.0,
+  ) -> None:
+    # initial_capital is used for Buy sizing modes that reference equity
+    # ("pct_equity"). We size against initial capital rather than current
+    # equity because the engine doesn't plumb live portfolio state into the
+    # strategy — and "% of initial" is a well-defined convention (cf.
+    # Zipline's `order_target_percent` semantics for the first trade).
+    self._initial_capital: float = float(initial_capital)
+
     self._nodes: dict[str, dict] = {
       n["id"]: n for n in graph.get("nodes", []) if n.get("id")
     }
@@ -129,6 +138,11 @@ class GraphStrategy:
     }
     self._has_exit: bool = bool(wired_exit_ids)
     self._in_position: bool = False
+    # Predicted position size. Mirrors the engine's real position group
+    # well enough to drive state transitions in the strategy (Buy→Sell
+    # guarding, partial-sell handling). Updated optimistically at signal
+    # emission time — same pattern as `_in_position`.
+    self._position_qty: float = 0.0
 
     # Risk-management state — tracked per entry, reset on exit
     self._entry_price: float | None = None
@@ -712,15 +726,36 @@ class GraphStrategy:
           amount = float(
             _node_data_field(node, "amount") or _node_param(node, "amount", 10)
           )
-          outputs[nid] = {"signal": AddSignal(
-            side=Side.BUY,
-            type=OrderType.MARKET,
-            price=float(bar.price),
-            symbol=bar.symbol,
-            quantity=amount,
-            take_profit=None,
-            stop_loss=None,
-          )}
+          # Sizing modes:
+          #   units       → quantity = amount (legacy, default for old graphs)
+          #   pct_equity  → quantity = floor((initial_capital × pct/100) / price)
+          #   dollar      → quantity = floor(amount / price)
+          size_type = str(
+            _node_param(node, "size_type")
+            or _node_data_field(node, "size_type")
+            or "units"
+          )
+          price = float(bar.price) if bar.price else 0.0
+          if size_type == "pct_equity" and price > 0:
+            dollars = self._initial_capital * (amount / 100.0)
+            quantity = max(0.0, math.floor(dollars / price))
+          elif size_type == "dollar" and price > 0:
+            quantity = max(0.0, math.floor(amount / price))
+          else:
+            quantity = amount
+
+          if quantity <= 0:
+            outputs[nid] = {"signal": None}
+          else:
+            outputs[nid] = {"signal": AddSignal(
+              side=Side.BUY,
+              type=OrderType.MARKET,
+              price=float(bar.price),
+              symbol=bar.symbol,
+              quantity=quantity,
+              take_profit=None,
+              stop_loss=None,
+            )}
         else:
           outputs[nid] = {"signal": None}
 
@@ -728,7 +763,28 @@ class GraphStrategy:
       elif ntype == "Sell":
         trigger = self._upstream(outputs, nid, "in")
         if trigger:
-          outputs[nid] = {"signal": CloseSignal(order_id=None)}
+          # Sizing modes:
+          #   all         → close full position (default, legacy)
+          #   pct_position → close <amount>% of current symbol group
+          #   units       → close exactly <amount> shares (capped to group)
+          size_type = str(
+            _node_param(node, "size_type")
+            or _node_data_field(node, "size_type")
+            or "all"
+          )
+          amount = float(
+            _node_data_field(node, "amount") or _node_param(node, "amount", 0)
+          )
+          if size_type == "pct_position" and amount > 0:
+            outputs[nid] = {"signal": CloseSignal(
+              order_id=None, fraction=min(1.0, amount / 100.0),
+            )}
+          elif size_type == "units" and amount > 0:
+            outputs[nid] = {"signal": CloseSignal(
+              order_id=None, quantity=amount,
+            )}
+          else:
+            outputs[nid] = {"signal": CloseSignal(order_id=None)}
         else:
           outputs[nid] = {"signal": None}
 
@@ -742,19 +798,42 @@ class GraphStrategy:
 
       if ntype in _exit_types:
         if self._in_position:
-          self._in_position = False
-          self._entry_price = None
-          self._trailing_max = None
+          # Predict how many shares this exit will close so we can decide
+          # whether the position is fully flat after dispatch. The engine
+          # caps actual close qty at the real position size; we mirror
+          # that with max(0, ...) here. Attributes are read via getattr
+          # because test stubs use a minimal CloseSignal surface.
+          qty_closed = self._position_qty
+          if isinstance(sig, CloseSignal):
+            sig_qty = getattr(sig, "quantity", None)
+            sig_frac = getattr(sig, "fraction", None)
+            if sig_qty is not None:
+              qty_closed = min(self._position_qty, float(sig_qty))
+            elif sig_frac is not None:
+              qty_closed = self._position_qty * float(sig_frac)
+          self._position_qty = max(0.0, self._position_qty - qty_closed)
+
+          if self._position_qty <= 1e-9:
+            self._in_position = False
+            self._position_qty = 0.0
+            self._entry_price = None
+            self._trailing_max = None
           return sig
 
       elif ntype == "Buy":
         if self._has_exit and self._in_position:
           pass
         else:
+          # Track predicted share count to drive partial-sell semantics.
+          # AddSignal.quantity is the resolved share count (sizing modes
+          # already resolved upstream in the Buy node handler).
+          added_qty = float(getattr(sig, "quantity", 0) or 0)
+          if not self._in_position:
+            entry = float(bar.Close if bar.Close is not None else bar.price)
+            self._entry_price = entry
+            self._trailing_max = entry
           self._in_position = True
-          entry = float(bar.Close if bar.Close is not None else bar.price)
-          self._entry_price = entry
-          self._trailing_max = entry
+          self._position_qty += added_qty
           return sig
 
     return NullSignal()
