@@ -13,7 +13,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /repo
 
-ARG TRADING_ENGINE_SHA=bce6028845a7d726374c845b928ce3a4bafcbfa8
+ARG TRADING_ENGINE_SHA=e81d43f4ba0d286bc3b86f9463f1e2def96246ff
 RUN git clone https://github.com/Quant-Backtester/trading_engine.git ./trading_engine \
     && git -C ./trading_engine checkout ${TRADING_ENGINE_SHA}
 
