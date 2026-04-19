@@ -321,6 +321,29 @@
     return ohlc.map((b) => ({ time: b.time, equity: b.close / first }));
   });
 
+  // Cumulative P&L — equity centred at $0 so small movements aren't crushed
+  // against the dollar-scale baseline of the NAV curve.
+  const cumulativePnl = $derived.by<EquityPoint[]>(() => {
+    if (equity.length === 0) return [];
+    const base = apiResults?.summary?.initial_capital ?? equity[0]?.equity;
+    if (base == null) return [];
+    return equity.map((p) => ({ time: p.time, equity: p.equity - base }));
+  });
+
+  // Drawdown — running (nav / peak) - 1, clamped at 0 on new highs.
+  // Rendered as percentage; stays non-positive by construction.
+  const drawdownSeries = $derived.by<EquityPoint[]>(() => {
+    if (equity.length === 0) return [];
+    let peak = equity[0].equity;
+    const out: EquityPoint[] = [];
+    for (const p of equity) {
+      if (p.equity > peak) peak = p.equity;
+      const dd = peak > 0 ? p.equity / peak - 1 : 0;
+      out.push({ time: p.time, equity: dd });
+    }
+    return out;
+  });
+
   const summary = $derived.by(() => {
     const api = apiResults?.summary ?? null;
 
@@ -528,6 +551,32 @@
             valueFormat="nav"
             height={220}
           />
+        </Card.CardContent>
+      </Card.Root>
+
+      <Card.Root class="border">
+        <Card.Header>
+          <Card.Title class="text-base">Cumulative P&L</Card.Title>
+          <Card.Description>
+            NAV minus initial capital, so small gains and losses aren't crushed against the $
+            {fmtCurrency(summary.initialCapital)} baseline.
+          </Card.Description>
+        </Card.Header>
+        <Card.CardContent>
+          <EquityCurveChart points={cumulativePnl} valueFormat="currency" height={220} />
+        </Card.CardContent>
+      </Card.Root>
+
+      <Card.Root class="border">
+        <Card.Header>
+          <Card.Title class="text-base">Drawdown</Card.Title>
+          <Card.Description>
+            Running decline from the running NAV peak — max drawdown was
+            {summary.maxDrawdown != null ? fmtPercent(summary.maxDrawdown) : '—'}.
+          </Card.Description>
+        </Card.Header>
+        <Card.CardContent>
+          <EquityCurveChart points={drawdownSeries} valueFormat="nav" height={180} />
         </Card.CardContent>
       </Card.Root>
 
