@@ -29,6 +29,7 @@ from .schemas import (
   BatchRunSummary,
   BatchAggregate,
   BatchCombinedResults,
+  BatchListItem,
 )
 from ._combine import combine_equity_curves
 from background.tasks import run_backtest_batch_task, run_universe_backtest_task
@@ -36,6 +37,7 @@ from .repositories import (
   create_batch,
   create_backtest_run,
   get_batch_by_id,
+  get_batches_by_user,
   get_run_by_id,
   get_runs_by_batch,
   get_runs_by_user,
@@ -197,6 +199,72 @@ def list_backtests(
       created_at=run.created_at,
       total_return=metrics.total_return if metrics else None,
       batch_id=run.batch_id,
+    ))
+
+  return result
+
+
+@backtest_router.get(
+  path="/batches",
+  response_model=list[BatchListItem],
+  status_code=status.HTTP_200_OK,
+)
+def list_batches(
+  current_user: CurrentUser = Depends(get_current_user),
+  session: Session = Depends(get_session),
+) -> list[BatchListItem]:
+  """List batch backtests for the current user — one row per batch, collapsing
+  fan-out children into an aggregate summary (returns, completed/failed counts).
+
+  History page uses this to avoid exploding a 20-symbol fan-out into 20 rows.
+  For universe-mode batches the batch IS the portfolio (a single run over many
+  symbols); `avg_return` is that run's total return.
+  """
+  from database.models import Strategy
+
+  user = get_user_by_email(session=session, email=current_user.email)
+  if not user:
+    raise NotFoundError(message="User not found")
+
+  batches = get_batches_by_user(session=session, user_id=user.id)
+  if not batches:
+    return []
+
+  result: list[BatchListItem] = []
+  for batch in batches:
+    symbols = json.loads(batch.symbols_json)
+    batch_settings = json.loads(batch.settings_json)
+    execution_mode = batch_settings.get("settings", {}).get("execution_mode")
+
+    runs = get_runs_by_batch(session=session, batch_id=batch.id)
+    completed = sum(1 for r in runs if r.status == "completed")
+    failed = sum(1 for r in runs if r.status == "failed")
+
+    returns: list[float] = []
+    for run in runs:
+      metrics = get_metrics_by_run(session=session, run_id=run.id)
+      if metrics and metrics.total_return is not None:
+        returns.append(metrics.total_return)
+    avg_return = sum(returns) / len(returns) if returns else None
+
+    strategy_name: str | None = None
+    if batch.strategy_id is not None:
+      strat = session.get(Strategy, batch.strategy_id)
+      if strat is not None:
+        strategy_name = strat.name
+
+    result.append(BatchListItem(
+      id=batch.id,
+      status=batch.status,
+      symbols=symbols,
+      total_symbols=len(symbols),
+      completed=completed,
+      failed=failed,
+      created_at=batch.created_at,
+      ended_at=batch.ended_at,
+      avg_return=avg_return,
+      execution_mode=execution_mode,
+      strategy_name=strategy_name,
     ))
 
   return result

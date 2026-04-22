@@ -5,6 +5,7 @@ import json
 import uuid
 from unittest.mock import patch, MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -514,3 +515,117 @@ def test_results_exposes_full_performance_metrics(
   assert summary["volatility"] == 0.15
   assert summary["annualized_return"] == 0.18
   assert summary["total_return"] == 0.25
+
+
+# ---------------------------------------------------------------------------
+# Batch history (GET /backtests/batches)
+# ---------------------------------------------------------------------------
+
+def test_list_batches_empty(client: TestClient, verified_user, auth_headers):
+  """New user has no batches."""
+  resp = client.get("/backtests/batches", headers=auth_headers)
+  assert resp.status_code == 200
+  assert resp.json() == []
+
+
+def test_list_batches_after_fan_out_submit(
+  client: TestClient, verified_user, auth_headers
+):
+  """A multi-symbol fan-out submit creates one batch with N queued runs — the
+  batch list collapses that into a single row with total_symbols=N."""
+  with patch("api.backtests.route.run_backtest_batch_task", _mock_batch_task()):
+    client.post("/backtests", json=MULTI_SYMBOL_PAYLOAD, headers=auth_headers)
+
+  resp = client.get("/backtests/batches", headers=auth_headers)
+  assert resp.status_code == 200
+  data = resp.json()
+  assert len(data) == 1
+  assert data[0]["status"] == "queued"
+  assert data[0]["total_symbols"] == 3
+  assert data[0]["completed"] == 0
+  assert data[0]["failed"] == 0
+  assert set(data[0]["symbols"]) == {"AAPL", "MSFT", "GOOGL"}
+  # No completed runs yet, so avg_return is null.
+  assert data[0]["avg_return"] is None
+
+
+def test_list_batches_universe_mode(client: TestClient, verified_user, auth_headers):
+  """Universe-mode batch has execution_mode='universe' and a single child run."""
+  universe_payload = {
+    "version": 0,
+    "settings": {
+      "timeframe": "1D",
+      "initial_capital": 10000.0,
+      "fees_bps": 0.0,
+      "slippage_bps": 0.0,
+      "execution_mode": "universe",
+    },
+    "symbols": ["AAPL", "MSFT", "GOOGL"],
+    "graph": {
+      "nodes": [{"id": "1", "type": "Data", "position": {"x": 0, "y": 0}, "data": {}}],
+      "edges": [],
+    },
+  }
+  with patch("api.backtests.route.run_universe_backtest_task", _mock_batch_task()):
+    client.post("/backtests", json=universe_payload, headers=auth_headers)
+
+  resp = client.get("/backtests/batches", headers=auth_headers)
+  assert resp.status_code == 200
+  data = resp.json()
+  assert len(data) == 1
+  assert data[0]["execution_mode"] == "universe"
+  assert data[0]["total_symbols"] == 3
+
+
+def test_list_batches_aggregates_returns(
+  client: TestClient, verified_user, auth_headers, db_session
+):
+  """With completed child runs + metrics, avg_return should equal the mean of
+  each run's total_return."""
+  from database.models import BacktestRun, BacktestBatch, RunMetrics
+
+  batch_settings = {
+    "settings": {"timeframe": "1D", "initial_capital": 10000.0},
+    "symbols": ["AAPL", "MSFT"],
+    "graph": {"nodes": [], "edges": []},
+  }
+  batch = BacktestBatch(
+    id=uuid.uuid4(),
+    user_id=verified_user.id,
+    symbols_json=json.dumps(["AAPL", "MSFT"]),
+    settings_json=json.dumps(batch_settings),
+    status="completed",
+  )
+  db_session.add(batch)
+  db_session.flush()
+
+  for symbol, total_return in (("AAPL", 0.20), ("MSFT", 0.10)):
+    run_settings = dict(batch_settings)
+    run_settings["settings"] = {**batch_settings["settings"], "symbol": symbol}
+    run = BacktestRun(
+      id=uuid.uuid4(),
+      user_id=verified_user.id,
+      status="completed",
+      settings_json=json.dumps(run_settings),
+      batch_id=batch.id,
+    )
+    db_session.add(run)
+    db_session.flush()
+    db_session.add(RunMetrics(
+      run_id=run.id,
+      initial_capital=10000.0,
+      final_nav=10000.0 * (1 + total_return),
+      total_return=total_return,
+      total_trades=1,
+      fees=0.0,
+      slippage=0.0,
+    ))
+  db_session.commit()
+
+  resp = client.get("/backtests/batches", headers=auth_headers)
+  assert resp.status_code == 200
+  data = resp.json()
+  assert len(data) == 1
+  assert data[0]["completed"] == 2
+  assert data[0]["failed"] == 0
+  assert data[0]["avg_return"] == pytest.approx(0.15)  # (0.20 + 0.10) / 2

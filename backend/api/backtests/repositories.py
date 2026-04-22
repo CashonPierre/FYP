@@ -88,6 +88,15 @@ def get_runs_by_batch(session: Session, batch_id: uuid.UUID) -> list[BacktestRun
   return list(session.execute(statement).scalars().all())
 
 
+def get_batches_by_user(session: Session, user_id: uuid.UUID) -> list[BacktestBatch]:
+  statement = (
+    select(BacktestBatch)
+    .where(BacktestBatch.user_id == user_id)
+    .order_by(BacktestBatch.created_at.desc())
+  )
+  return list(session.execute(statement).scalars().all())
+
+
 def update_batch_status_from_runs(session: Session, batch_id: uuid.UUID) -> None:
   """Recompute and persist batch status based on current child run statuses."""
   runs = get_runs_by_batch(session, batch_id)

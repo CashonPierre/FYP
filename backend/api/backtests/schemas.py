@@ -197,6 +197,28 @@ class BatchStatus(BaseModel):
   ended_at: datetime | None = None
 
 
+class BatchListItem(BaseModel):
+  """One row in the batch history list — aggregate-only, no per-run detail.
+
+  Mirrors `BacktestListItem` but for multi-symbol/universe batches. The
+  History page uses this to collapse N-symbol batches into one entry
+  instead of showing every child run as a separate line.
+  """
+  id: uuid.UUID
+  status: str                         # queued/running/completed/failed/partial
+  symbols: list[str]
+  total_symbols: int
+  completed: int
+  failed: int
+  created_at: datetime
+  ended_at: datetime | None = None
+  avg_return: float | None = None
+  # "single" (fan-out) or "universe" (cross-sectional). None for legacy
+  # batches that predate the mode field — treat as "single".
+  execution_mode: str | None = None
+  strategy_name: str | None = None
+
+
 class BatchCombinedResults(BaseModel):
   """Equal-weight portfolio view of a multi-symbol batch.
 
