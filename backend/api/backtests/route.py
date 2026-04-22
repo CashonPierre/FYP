@@ -28,7 +28,9 @@ from .schemas import (
   BatchStatus,
   BatchRunSummary,
   BatchAggregate,
+  BatchCombinedResults,
 )
+from ._combine import combine_equity_curves
 from background.tasks import run_backtest_batch_task, run_universe_backtest_task
 from .repositories import (
   create_batch,
@@ -467,4 +469,121 @@ def get_batch_status(
     created_at=batch.created_at,
     started_at=batch.started_at,
     ended_at=batch.ended_at,
+  )
+
+
+@backtest_router.get(
+  path="/batch/{batch_id}/combined",
+  response_model=BatchCombinedResults,
+  status_code=status.HTTP_200_OK,
+)
+def get_batch_combined_results(
+  batch_id: uuid.UUID,
+  current_user: CurrentUser = Depends(get_current_user),
+  session: Session = Depends(get_session),
+) -> BatchCombinedResults:
+  """Equal-weight portfolio view of a multi-symbol fan-out batch.
+
+  Pools each completed child run's equity curve into a single NAV series
+  with `initial_capital / N` allocated per symbol, then recomputes the
+  portfolio-level metrics. Failed / incomplete runs are excluded from N.
+  """
+  from sqlalchemy import select
+  from background.tasks._perf_metrics import compute as compute_metrics
+
+  batch: BacktestBatch | None = get_batch_by_id(session=session, batch_id=batch_id)
+  if not batch:
+    raise NotFoundError(message="Backtest batch not found")
+
+  batch_settings = json.loads(batch.settings_json)
+  initial_capital = float(
+    batch_settings.get("settings", {}).get("initial_capital", 10000.0)
+  )
+
+  runs = get_runs_by_batch(session=session, batch_id=batch_id)
+
+  included_symbols: list[str] = []
+  skipped_symbols: list[str] = []
+  curves: list[list[tuple[object, float]]] = []
+
+  for run in runs:
+    run_settings = json.loads(run.settings_json)
+    sym = run_settings.get("settings", {}).get("symbol") or ""
+    if run.status != "completed":
+      if sym:
+        skipped_symbols.append(sym)
+      continue
+
+    stmt = (
+      select(EquityPointModel)
+      .where(EquityPointModel.run_id == run.id)
+      .order_by(EquityPointModel.time)
+    )
+    points = [(p.time, p.equity) for p in session.execute(stmt).scalars().all()]
+    if not points:
+      if sym:
+        skipped_symbols.append(sym)
+      continue
+
+    included_symbols.append(sym)
+    curves.append(points)
+
+  if not curves:
+    return BatchCombinedResults(
+      id=batch.id,
+      status=batch.status,
+      symbols=[],
+      skipped_symbols=skipped_symbols,
+      initial_capital=initial_capital,
+      summary=None,
+      equity=[],
+    )
+
+  combined = combine_equity_curves(curves, initial_capital)
+  perf = compute_metrics(combined, initial_capital)
+
+  # Aggregate trade count and fees/slippage by summing across included runs
+  # — these are portfolio-level totals for the combined view.
+  total_trades = 0
+  total_fees = 0.0
+  total_slippage = 0.0
+  for run in runs:
+    if run.status != "completed":
+      continue
+    m = get_metrics_by_run(session=session, run_id=run.id)
+    if m is None:
+      continue
+    total_trades += m.total_trades or 0
+    total_fees += m.fees or 0.0
+    total_slippage += m.slippage or 0.0
+
+  final_nav = combined[-1][1]
+  summary = ResultSummary(
+    initial_capital=initial_capital,
+    final_nav=final_nav,
+    total_return=perf.total_return,
+    annualized_return=perf.annualized_return,
+    max_drawdown=perf.max_drawdown,
+    volatility=perf.volatility,
+    sharpe=perf.sharpe,
+    sortino=perf.sortino,
+    calmar=perf.calmar,
+    total_trades=total_trades,
+    win_rate=None,  # can't aggregate without trade-level PnL
+    fees=total_fees,
+    slippage=total_slippage,
+  )
+
+  equity_points = [
+    EquityPoint(time=t.isoformat(), equity=e) for t, e in combined
+  ]
+
+  return BatchCombinedResults(
+    id=batch.id,
+    status=batch.status,
+    symbols=included_symbols,
+    skipped_symbols=skipped_symbols,
+    initial_capital=initial_capital,
+    summary=summary,
+    equity=equity_points,
   )

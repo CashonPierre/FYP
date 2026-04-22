@@ -260,6 +260,120 @@ def test_list_backtests_universe_mode_run(client: TestClient, verified_user, aut
   assert data[0]["symbol"] is None
 
 
+def test_get_batch_combined_results_pools_completed_runs(
+  client: TestClient, verified_user, auth_headers, db_session
+):
+  """Combined endpoint must equal-weight the completed runs, skip the failed
+  ones, and recompute portfolio metrics on the pooled NAV."""
+  from datetime import datetime, timezone, timedelta
+  from database.models import (
+    BacktestRun, BacktestBatch, EquityPoint as EquityPointModel
+  )
+
+  batch_settings = {
+    "settings": {
+      "timeframe": "1D",
+      "initial_capital": 10000.0,
+      "fees_bps": 0.0,
+      "slippage_bps": 0.0,
+    },
+    "symbols": ["AAPL", "MSFT", "GOOGL"],
+    "graph": {"nodes": [], "edges": []},
+  }
+  batch = BacktestBatch(
+    id=uuid.uuid4(),
+    user_id=verified_user.id,
+    symbols_json=json.dumps(["AAPL", "MSFT", "GOOGL"]),
+    settings_json=json.dumps(batch_settings),
+    status="completed",
+  )
+  db_session.add(batch)
+  db_session.flush()
+
+  def _seed_run(symbol: str, status: str, equity: list[tuple[datetime, float]]):
+    run_settings = dict(batch_settings)
+    run_settings["settings"] = dict(batch_settings["settings"])
+    run_settings["settings"]["symbol"] = symbol
+    run = BacktestRun(
+      id=uuid.uuid4(),
+      user_id=verified_user.id,
+      status=status,
+      settings_json=json.dumps(run_settings),
+      batch_id=batch.id,
+    )
+    db_session.add(run)
+    db_session.flush()
+    for t, e in equity:
+      db_session.add(EquityPointModel(run_id=run.id, time=t, equity=e))
+
+  base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+  # Two completed runs: AAPL +50%, MSFT flat. GOOGL failed (skipped).
+  _seed_run("AAPL", "completed", [(base, 10_000.0), (base + timedelta(days=1), 15_000.0)])
+  _seed_run("MSFT", "completed", [(base, 10_000.0), (base + timedelta(days=1), 10_000.0)])
+  _seed_run("GOOGL", "failed", [])
+  db_session.flush()
+
+  resp = client.get(f"/backtests/batch/{batch.id}/combined", headers=auth_headers)
+  assert resp.status_code == 200
+  data = resp.json()
+
+  assert data["id"] == str(batch.id)
+  assert set(data["symbols"]) == {"AAPL", "MSFT"}
+  assert data["skipped_symbols"] == ["GOOGL"]
+  assert data["initial_capital"] == 10_000.0
+  assert len(data["equity"]) == 2
+  assert data["equity"][0]["equity"] == 10_000.0   # start
+  assert data["equity"][1]["equity"] == 12_500.0   # (15000 + 10000) / 2
+  # Total return on the pooled series: 25%.
+  assert abs(data["summary"]["total_return"] - 0.25) < 1e-9
+  assert data["summary"]["final_nav"] == 12_500.0
+
+
+def test_get_batch_combined_results_no_completed_runs(
+  client: TestClient, verified_user, auth_headers, db_session
+):
+  """If every run failed, the combined endpoint returns 200 with an empty
+  equity series and a null summary — the UI can then show a clear
+  empty-state instead of a 500."""
+  from database.models import BacktestRun, BacktestBatch
+
+  batch_settings = {
+    "settings": {"timeframe": "1D", "initial_capital": 5000.0, "fees_bps": 0.0, "slippage_bps": 0.0},
+    "symbols": ["AAA", "BBB"],
+    "graph": {"nodes": [], "edges": []},
+  }
+  batch = BacktestBatch(
+    id=uuid.uuid4(),
+    user_id=verified_user.id,
+    symbols_json=json.dumps(["AAA", "BBB"]),
+    settings_json=json.dumps(batch_settings),
+    status="failed",
+  )
+  db_session.add(batch)
+  db_session.flush()
+
+  for sym in ("AAA", "BBB"):
+    run_settings = dict(batch_settings)
+    run_settings["settings"] = dict(batch_settings["settings"])
+    run_settings["settings"]["symbol"] = sym
+    db_session.add(BacktestRun(
+      id=uuid.uuid4(),
+      user_id=verified_user.id,
+      status="failed",
+      settings_json=json.dumps(run_settings),
+      batch_id=batch.id,
+    ))
+  db_session.flush()
+
+  resp = client.get(f"/backtests/batch/{batch.id}/combined", headers=auth_headers)
+  assert resp.status_code == 200
+  data = resp.json()
+  assert data["equity"] == []
+  assert data["summary"] is None
+  assert set(data["skipped_symbols"]) == {"AAA", "BBB"}
+  assert data["initial_capital"] == 5000.0
+
+
 def test_submit_universe_resolves_symbols(client: TestClient, verified_user, auth_headers):
   """Submitting with a universe key fans out to the universe's symbol list."""
   universe_payload = {

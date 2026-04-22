@@ -195,3 +195,20 @@ class BatchStatus(BaseModel):
   created_at: datetime
   started_at: datetime | None = None
   ended_at: datetime | None = None
+
+
+class BatchCombinedResults(BaseModel):
+  """Equal-weight portfolio view of a multi-symbol batch.
+
+  Each completed child run is allocated `initial_capital / N` and the
+  per-run equity curves are pooled into a single NAV series. Failed /
+  incomplete runs are excluded from N (the combined portfolio represents
+  only the symbols that actually ran).
+  """
+  id: uuid.UUID                  # batch_id
+  status: str                    # batch status
+  symbols: list[str]             # symbols included in the combination
+  skipped_symbols: list[str] = []  # symbols whose runs failed / never completed
+  initial_capital: float
+  summary: ResultSummary | None = None
+  equity: list[EquityPoint] = []

@@ -5,6 +5,7 @@
   import { toast } from 'svelte-sonner';
   import { Button } from '$lib/components/ui/button/index.js';
   import * as Card from '$lib/components/ui/card/index.js';
+  import EquityCurveChart, { type EquityPoint } from '$lib/components/charts/EquityCurveChart.svelte';
   import { BACKEND } from '$lib/config.js';
 
   type RunStatus = 'queued' | 'running' | 'completed' | 'failed';
@@ -44,12 +45,42 @@
     ended_at: string | null;
   };
 
+  type CombinedSummary = {
+    initial_capital: number;
+    final_nav: number;
+    total_return: number;
+    annualized_return: number | null;
+    max_drawdown: number | null;
+    volatility: number | null;
+    sharpe: number | null;
+    sortino: number | null;
+    calmar: number | null;
+    total_trades: number;
+    win_rate: number | null;
+    fees: number;
+    slippage: number;
+  };
+
+  type CombinedResults = {
+    id: string;
+    status: string;
+    symbols: string[];
+    skipped_symbols: string[];
+    initial_capital: number;
+    summary: CombinedSummary | null;
+    equity: EquityPoint[];
+  };
+
   const batchId = $derived(page.params.id ?? '');
 
   let batch = $state<BatchStatus | null>(null);
   let loading = $state(true);
   let errMsg = $state<string | null>(null);
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  let combined = $state<CombinedResults | null>(null);
+  let combinedLoading = $state(false);
+  let combinedError = $state<string | null>(null);
 
   const percent = new Intl.NumberFormat('en-US', {
     style: 'percent',
@@ -91,11 +122,37 @@
       if (data.status === 'completed' || data.status === 'failed' || data.status === 'partial') {
         if (pollTimer) clearInterval(pollTimer);
         pollTimer = null;
+        // Only fetch the combined payload once the batch is done and at least
+        // one symbol completed — nothing to pool otherwise.
+        if (!combined && !combinedLoading && data.aggregate.completed > 0) {
+          fetchCombined();
+        }
       }
     } catch {
       // transient — keep polling
     } finally {
       loading = false;
+    }
+  };
+
+  const fetchCombined = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    combinedLoading = true;
+    combinedError = null;
+    try {
+      const res = await fetch(`${BACKEND}/backtests/batch/${batchId}/combined`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        combinedError = `Failed to load combined view (HTTP ${res.status})`;
+        return;
+      }
+      combined = (await res.json()) as CombinedResults;
+    } catch (e) {
+      combinedError = e instanceof Error ? e.message : 'Network error';
+    } finally {
+      combinedLoading = false;
     }
   };
 
@@ -203,6 +260,78 @@
         </div>
       </Card.CardContent>
     </Card.Root>
+
+    {#if combined || combinedLoading || combinedError}
+      <Card.Root class="border">
+        <Card.Header>
+          <Card.Title class="text-base">Combined Portfolio</Card.Title>
+          <Card.Description>
+            Equal-weight pool of every completed symbol (each gets
+            initial_capital / N). Misaligned coverage is forward-filled.
+          </Card.Description>
+        </Card.Header>
+        <Card.CardContent>
+          {#if combinedLoading && !combined}
+            <div class="text-sm text-muted-foreground">Loading combined view…</div>
+          {:else if combinedError}
+            <div class="text-sm text-destructive">{combinedError}</div>
+          {:else if combined && combined.summary}
+            <div class="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
+              <div>
+                <div class="text-xs text-muted-foreground">Total Return</div>
+                <div class="text-lg font-medium {combined.summary.total_return >= 0 ? 'text-green-600' : 'text-destructive'}">
+                  {fmtPercent(combined.summary.total_return)}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs text-muted-foreground">Annualized</div>
+                <div class="text-lg font-medium">
+                  {fmtPercent(combined.summary.annualized_return)}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs text-muted-foreground">Sharpe</div>
+                <div class="text-lg font-medium">
+                  {fmtNumber3(combined.summary.sharpe)}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs text-muted-foreground">Max DD</div>
+                <div class="text-lg font-medium text-destructive">
+                  {fmtPercent(combined.summary.max_drawdown)}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs text-muted-foreground">Volatility</div>
+                <div class="text-lg font-medium">
+                  {fmtPercent(combined.summary.volatility)}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs text-muted-foreground">Trades</div>
+                <div class="text-lg font-medium">{combined.summary.total_trades}</div>
+              </div>
+            </div>
+            <div class="mt-4 text-xs text-muted-foreground">
+              Pooled {combined.symbols.length} symbol{combined.symbols.length === 1 ? '' : 's'}
+              · Initial capital ${combined.initial_capital.toLocaleString()}
+              {#if combined.skipped_symbols.length > 0}
+                · Skipped: <span class="text-destructive">{combined.skipped_symbols.join(', ')}</span>
+              {/if}
+            </div>
+            {#if combined.equity.length > 1}
+              <div class="mt-4">
+                <EquityCurveChart points={combined.equity} height={260} />
+              </div>
+            {/if}
+          {:else if combined}
+            <div class="text-sm text-muted-foreground">
+              No completed runs to combine yet.
+            </div>
+          {/if}
+        </Card.CardContent>
+      </Card.Root>
+    {/if}
 
     <Card.Root class="border">
       <Card.Header class="flex flex-row items-start justify-between gap-4 space-y-0">
