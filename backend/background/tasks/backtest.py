@@ -370,6 +370,23 @@ def run_backtest(self: Task, run_id: str) -> None:
       bars = list(session.execute(stmt).scalars().all())
 
       if not bars:
+        coverage = session.execute(
+          select(func.min(OhlcBar.time), func.max(OhlcBar.time)).where(
+            and_(
+              OhlcBar.symbol == symbol,
+              OhlcBar.timeframe == timeframe,
+            )
+          )
+        ).one_or_none()
+        earliest = coverage[0] if coverage else None
+        latest = coverage[1] if coverage else None
+        if earliest and latest:
+          window = f"{start_date} → {end_date}" if start_date and end_date else "requested window"
+          raise ValueError(
+            f"No {symbol} ({timeframe}) bars in {window}. "
+            f"Available range: {earliest.date()} → {latest.date()}. "
+            f"Adjust the backtest window to overlap."
+          )
         raise ValueError(f"No market data found for {symbol} ({timeframe})")
 
     # --- 4. Set up engine ---
