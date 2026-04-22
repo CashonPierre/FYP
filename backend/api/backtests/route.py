@@ -189,7 +189,8 @@ def list_backtests(
     result.append(BacktestListItem(
       id=run.id,
       status=run.status,
-      symbol=settings.get("settings", {}).get("symbol", ""),
+      # None for universe-mode runs; fan-out runs have a concrete symbol.
+      symbol=settings.get("settings", {}).get("symbol"),
       timeframe=settings.get("settings", {}).get("timeframe", "1D"),
       created_at=run.created_at,
       total_return=metrics.total_return if metrics else None,

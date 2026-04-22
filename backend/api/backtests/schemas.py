@@ -145,7 +145,8 @@ class BacktestResults(BaseModel):
 class BacktestListItem(BaseModel):
   id: uuid.UUID
   status: str
-  symbol: str
+  # None for universe-mode runs whose settings carry `symbols` (plural).
+  symbol: str | None = None
   timeframe: str
   created_at: datetime
   total_return: float | None = None

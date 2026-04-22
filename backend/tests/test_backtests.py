@@ -226,6 +226,40 @@ def test_get_batch_status_universe_mode(client: TestClient, verified_user, auth_
   assert data["runs"][0]["symbol"] is None  # universe run has no single symbol
 
 
+def test_list_backtests_universe_mode_run(client: TestClient, verified_user, auth_headers):
+  """GET /backtests must serialise a universe-mode run whose settings have
+  `symbols` (plural) and no single `symbol`.
+
+  Regression: BacktestListItem.symbol was non-optional, so once a user had
+  even one universe-mode run in their history, the list endpoint 500'd.
+  """
+  universe_mode_payload = {
+    "version": 0,
+    "settings": {
+      "timeframe": "1D",
+      "start_date": "2013-01-01",
+      "end_date": "2018-01-01",
+      "initial_capital": 10000.0,
+      "fees_bps": 0.0,
+      "slippage_bps": 0.0,
+      "execution_mode": "universe",
+    },
+    "symbols": ["AAPL", "MSFT"],
+    "graph": {
+      "nodes": [{"id": "1", "type": "Data", "position": {"x": 0, "y": 0}, "data": {}}],
+      "edges": [],
+    },
+  }
+  with patch("api.backtests.route.run_universe_backtest_task", _mock_batch_task()):
+    client.post("/backtests", json=universe_mode_payload, headers=auth_headers)
+
+  resp = client.get("/backtests", headers=auth_headers)
+  assert resp.status_code == 200
+  data = resp.json()
+  assert len(data) == 1
+  assert data[0]["symbol"] is None
+
+
 def test_submit_universe_resolves_symbols(client: TestClient, verified_user, auth_headers):
   """Submitting with a universe key fans out to the universe's symbol list."""
   universe_payload = {
