@@ -196,6 +196,9 @@
   let targetSymbol = $state('AAPL');
   let periodStart = $state('2013-01-01'); // YYYY-MM-DD — dense S&P 500 data starts here
   let periodEnd = $state('2018-12-31');   // YYYY-MM-DD — dense data ends here; clear for full range
+  let initialCapital = $state(10000);
+  let feesBps = $state(0);                // basis points per trade (1 bp = 0.01%)
+  let slippageBps = $state(0);            // basis points per trade
 
   // Multi-symbol mode
   type UniverseMeta = { key: string; name: string; description: string; count: number; symbols: string[] };
@@ -1095,9 +1098,9 @@
         timeframe,
         startDate: periodStart.trim() ? periodStart.trim() : undefined,
         endDate: periodEnd.trim() ? periodEnd.trim() : undefined,
-        initialCapital: 10000,
-        feesBps: 0,
-        slippageBps: 0,
+        initialCapital: Number(initialCapital) || 10000,
+        feesBps: Number(feesBps) || 0,
+        slippageBps: Number(slippageBps) || 0,
       },
       graph: { nodes, edges },
     };
@@ -1369,6 +1372,9 @@
       const end = settings.endDate;
       periodStart = typeof start === 'string' ? start : '';
       periodEnd = typeof end === 'string' ? end : '';
+      if (typeof settings.initialCapital === 'number') initialCapital = settings.initialCapital;
+      if (typeof settings.feesBps === 'number') feesBps = settings.feesBps;
+      if (typeof settings.slippageBps === 'number') slippageBps = settings.slippageBps;
     }
   };
 
@@ -2094,6 +2100,44 @@
     >
       Clear dates
     </button>
+  </div>
+  <div class="mt-4 grid gap-3 sm:grid-cols-3">
+    <div class="space-y-1">
+      <Label for="initialCapital">Initial Capital ($)</Label>
+      <Input
+        id="initialCapital"
+        type="number"
+        min="1"
+        step="100"
+        bind:value={initialCapital}
+      />
+    </div>
+    <div class="space-y-1">
+      <Label for="feesBps">Fees (bps)</Label>
+      <Input
+        id="feesBps"
+        type="number"
+        min="0"
+        step="0.5"
+        bind:value={feesBps}
+      />
+      <p class="text-xs text-muted-foreground">
+        1 bp = 0.01% per trade. IB retail ≈ 5–10 bps.
+      </p>
+    </div>
+    <div class="space-y-1">
+      <Label for="slippageBps">Slippage (bps)</Label>
+      <Input
+        id="slippageBps"
+        type="number"
+        min="0"
+        step="0.5"
+        bind:value={slippageBps}
+      />
+      <p class="text-xs text-muted-foreground">
+        Liquid US equities: 1–5 bps. Illiquid: 10–50 bps.
+      </p>
+    </div>
   </div>
   {#if maxWarmupBars > 0}
     <div class="mt-1 text-xs text-amber-600 dark:text-amber-400">
