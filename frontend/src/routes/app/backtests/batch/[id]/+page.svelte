@@ -74,6 +74,12 @@
   const batchId = $derived(page.params.id ?? '');
 
   let batch = $state<BatchStatus | null>(null);
+  // Universe mode: a single run whose settings span many symbols (cross-sectional
+  // factor strategy). There is no genuine per-symbol data — the "run" already IS
+  // the portfolio — so we collapse the per-symbol table and best/worst cells.
+  const isUniverseMode = $derived(
+    !!batch && batch.runs.length === 1 && batch.symbols.length > 1,
+  );
   let loading = $state(true);
   let errMsg = $state<string | null>(null);
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -221,53 +227,77 @@
       <Card.Header>
         <Card.Title class="text-base capitalize">{batch.status}</Card.Title>
         <Card.Description>
-          {batch.aggregate.completed} / {batch.aggregate.total_symbols} completed
-          {#if batch.aggregate.failed > 0} · {batch.aggregate.failed} failed{/if}
-          {#if batch.aggregate.running > 0} · {batch.aggregate.running} running{/if}
-          {#if batch.aggregate.queued > 0} · {batch.aggregate.queued} queued{/if}
+          {#if isUniverseMode}
+            Universe run · {batch.symbols.length} symbols ranked cross-sectionally
+          {:else}
+            {batch.aggregate.completed} / {batch.aggregate.total_symbols} completed
+            {#if batch.aggregate.failed > 0} · {batch.aggregate.failed} failed{/if}
+            {#if batch.aggregate.running > 0} · {batch.aggregate.running} running{/if}
+            {#if batch.aggregate.queued > 0} · {batch.aggregate.queued} queued{/if}
+          {/if}
         </Card.Description>
       </Card.Header>
       <Card.CardContent>
-        <div class="grid gap-4 sm:grid-cols-4">
-          <div>
-            <div class="text-xs text-muted-foreground">Avg Return</div>
-            <div class="text-lg font-medium">
-              {fmtPercent(batch.aggregate.avg_return)}
+        {#if isUniverseMode}
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <div class="text-xs text-muted-foreground">Mode</div>
+              <div class="text-lg font-medium">Cross-sectional</div>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">Universe Size</div>
+              <div class="text-lg font-medium">{batch.symbols.length} symbols</div>
             </div>
           </div>
-          <div>
-            <div class="text-xs text-muted-foreground">Best</div>
-            <div class="text-lg font-medium text-green-600">
-              {batch.aggregate.best_symbol ?? '—'}
-              {#if batch.aggregate.best_return != null}
-                <span class="text-xs">({fmtPercent(batch.aggregate.best_return)})</span>
-              {/if}
+        {:else}
+          <div class="grid gap-4 sm:grid-cols-4">
+            <div>
+              <div class="text-xs text-muted-foreground">Avg Return</div>
+              <div class="text-lg font-medium">
+                {fmtPercent(batch.aggregate.avg_return)}
+              </div>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">Best</div>
+              <div class="text-lg font-medium text-green-600">
+                {batch.aggregate.best_symbol ?? '—'}
+                {#if batch.aggregate.best_return != null}
+                  <span class="text-xs">({fmtPercent(batch.aggregate.best_return)})</span>
+                {/if}
+              </div>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">Worst</div>
+              <div class="text-lg font-medium text-destructive">
+                {batch.aggregate.worst_symbol ?? '—'}
+                {#if batch.aggregate.worst_return != null}
+                  <span class="text-xs">({fmtPercent(batch.aggregate.worst_return)})</span>
+                {/if}
+              </div>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">Symbols</div>
+              <div class="text-lg font-medium">{batch.aggregate.total_symbols}</div>
             </div>
           </div>
-          <div>
-            <div class="text-xs text-muted-foreground">Worst</div>
-            <div class="text-lg font-medium text-destructive">
-              {batch.aggregate.worst_symbol ?? '—'}
-              {#if batch.aggregate.worst_return != null}
-                <span class="text-xs">({fmtPercent(batch.aggregate.worst_return)})</span>
-              {/if}
-            </div>
-          </div>
-          <div>
-            <div class="text-xs text-muted-foreground">Symbols</div>
-            <div class="text-lg font-medium">{batch.aggregate.total_symbols}</div>
-          </div>
-        </div>
+        {/if}
       </Card.CardContent>
     </Card.Root>
 
     {#if combined || combinedLoading || combinedError}
       <Card.Root class="border">
         <Card.Header>
-          <Card.Title class="text-base">Combined Portfolio</Card.Title>
+          <Card.Title class="text-base">
+            {isUniverseMode ? 'Portfolio Performance' : 'Combined Portfolio'}
+          </Card.Title>
           <Card.Description>
-            Equal-weight pool of every completed symbol (each gets
-            initial_capital / N). Misaligned coverage is forward-filled.
+            {#if isUniverseMode}
+              Cross-sectional factor portfolio — the strategy ranks the universe
+              every bar and holds the top selections as one pooled NAV.
+            {:else}
+              Equal-weight pool of every completed symbol (each gets
+              initial_capital / N). Misaligned coverage is forward-filled.
+            {/if}
           </Card.Description>
         </Card.Header>
         <Card.CardContent>
@@ -333,6 +363,7 @@
       </Card.Root>
     {/if}
 
+    {#if !isUniverseMode}
     <Card.Root class="border">
       <Card.Header class="flex flex-row items-start justify-between gap-4 space-y-0">
         <div class="space-y-1">
@@ -407,5 +438,6 @@
         </table>
       </Card.CardContent>
     </Card.Root>
+    {/if}
   {/if}
 </div>
