@@ -110,6 +110,13 @@ def _build_ttm_eps_df(
     # Normalize index tz to naive to match bar_idx_naive
     if quarterly.index.tz is not None:
       quarterly.index = quarterly.index.tz_convert("UTC").tz_localize(None)
+    # Dedupe duplicate available_from labels. Restated filings, tz
+    # normalization collapsing close timestamps, or two reports for the
+    # same period can all produce duplicates. `ttm.reindex(...)` later
+    # blows up with "cannot reindex on an axis with duplicate labels"
+    # otherwise. Rows were sorted by period_end above, so keep="last"
+    # wins the latest restatement (correct point-in-time semantics).
+    quarterly = quarterly[~quarterly.index.duplicated(keep="last")].sort_index()
     ttm = quarterly.rolling(window=4, min_periods=1).sum()
 
     union = quarterly.index.union(bar_idx_naive).sort_values()

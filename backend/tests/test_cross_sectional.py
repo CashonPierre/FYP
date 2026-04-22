@@ -330,6 +330,28 @@ def test_run_cross_sectional_value_long_only():
   assert abs(result["metrics"]["final_nav"] - 10_000.0) < 1e-6
 
 
+def test_build_ttm_eps_df_dedupes_duplicate_available_from():
+  """Regression: restated filings (or tz normalization) can produce two
+  fundamental rows with the same `available_from`. `_build_ttm_eps_df`
+  must dedupe before reindexing — otherwise pandas raises
+  `cannot reindex on an axis with duplicate labels` and the whole
+  universe-mode backtest fails.
+  """
+  from background.tasks.cross_sectional import _build_ttm_eps_df
+
+  bar_index = pd.DatetimeIndex(pd.date_range("2024-03-01", periods=10))
+  same_af = datetime(2024, 2, 15)
+  rows = [
+    _FundRow(period_end=datetime(2023, 12, 31), available_from=same_af, diluted_eps=1.0),
+    _FundRow(period_end=datetime(2023, 12, 31), available_from=same_af, diluted_eps=2.0),  # restated
+  ]
+
+  df = _build_ttm_eps_df(lambda _sym: rows, ["AAA"], bar_index)
+  assert not df.empty
+  # The later row (keep=last) wins; rolling(4).sum over a single entry is itself.
+  assert df["AAA"].iloc[-1] == 2.0
+
+
 def test_run_cross_sectional_value_requires_fundamentals_fetcher():
   start = datetime(2024, 1, 1, tzinfo=timezone.utc)
   data = {
