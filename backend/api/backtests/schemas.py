@@ -159,7 +159,9 @@ class BacktestListItem(BaseModel):
 class BatchRunSummary(BaseModel):
   """Summary of one symbol's run within a batch."""
   run_id: uuid.UUID
-  symbol: str
+  # None for universe-mode runs (cross-sectional factor run over many symbols)
+  # where a single run has no single "symbol"; its settings carry `symbols` instead.
+  symbol: str | None = None
   status: str
   total_return: float | None = None
   max_drawdown: float | None = None

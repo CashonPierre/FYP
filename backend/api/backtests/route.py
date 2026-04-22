@@ -416,7 +416,8 @@ def get_batch_status(
 
   for run in runs:
     run_settings = json.loads(run.settings_json)
-    sym = run_settings.get("settings", {}).get("symbol", "")
+    # None for universe-mode runs; single/multi fan-out runs inject a concrete symbol.
+    sym = run_settings.get("settings", {}).get("symbol")
     metrics = get_metrics_by_run(session=session, run_id=run.id)
 
     total_return = metrics.total_return if metrics else None

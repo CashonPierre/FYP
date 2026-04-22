@@ -189,6 +189,43 @@ def test_get_batch_status_after_submit(client: TestClient, verified_user, auth_h
   assert data["aggregate"]["completed"] == 0
 
 
+def test_get_batch_status_universe_mode(client: TestClient, verified_user, auth_headers):
+  """Batch status for a universe-mode run must serialise even though the run
+  has no single `symbol` (its settings carry `symbols` plural).
+
+  Regression: BatchRunSummary.symbol was non-optional, so the endpoint 500'd
+  with a Pydantic validation error whenever a universe-mode batch was queried.
+  """
+  universe_mode_payload = {
+    "version": 0,
+    "settings": {
+      "timeframe": "1D",
+      "start_date": "2013-01-01",
+      "end_date": "2018-01-01",
+      "initial_capital": 10000.0,
+      "fees_bps": 0.0,
+      "slippage_bps": 0.0,
+      "execution_mode": "universe",
+    },
+    "symbols": ["AAPL", "MSFT"],
+    "graph": {
+      "nodes": [{"id": "1", "type": "Data", "position": {"x": 0, "y": 0}, "data": {}}],
+      "edges": [],
+    },
+  }
+  with patch("api.backtests.route.run_universe_backtest_task", _mock_batch_task()):
+    submit_resp = client.post("/backtests", json=universe_mode_payload, headers=auth_headers)
+
+  assert submit_resp.status_code == 201
+  batch_id = submit_resp.json()["batch_id"]
+
+  resp = client.get(f"/backtests/batch/{batch_id}", headers=auth_headers)
+  assert resp.status_code == 200
+  data = resp.json()
+  assert len(data["runs"]) == 1
+  assert data["runs"][0]["symbol"] is None  # universe run has no single symbol
+
+
 def test_submit_universe_resolves_symbols(client: TestClient, verified_user, auth_headers):
   """Submitting with a universe key fans out to the universe's symbol list."""
   universe_payload = {
