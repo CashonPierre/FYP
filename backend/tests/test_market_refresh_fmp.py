@@ -279,6 +279,65 @@ def test_fmp_noop_when_window_is_empty(unit_session):
 
 
 # ---------------------------------------------------------------------------
+# Crypto/forex symbol normalization — `BTC-USD` → `BTCUSD` for FMP, DB keeps
+# canonical `BTC-USD` so UI / backtests don't need to care.
+# ---------------------------------------------------------------------------
+
+def test_fmp_crypto_symbol_rewrites_for_api_call(unit_session):
+  from background.tasks.market_refresh_fmp import fetch_and_upsert_fmp
+
+  captured = {}
+
+  def _capture(url, params=None, timeout=None):
+    captured["params"] = params
+    resp = MagicMock(spec=httpx.Response)
+    resp.status_code = 200
+    resp.json.return_value = [
+      {"date": "2024-03-28", "open": 69000.0, "high": 70000.0, "low": 68500.0,
+       "close": 69500.0, "volume": 12345},
+    ]
+    resp.raise_for_status = MagicMock()
+    return resp
+
+  with patch("httpx.get", side_effect=_capture):
+    fetch_and_upsert_fmp(
+      symbol="BTC-USD", timeframe="1D",
+      start="2024-03-27", end="2024-04-01",
+      session=unit_session,
+    )
+
+  # Outbound API call uses FMP's concatenated form
+  assert captured["params"]["symbol"] == "BTCUSD"
+  # But the DB row preserves the canonical hyphenated symbol
+  row = unit_session.execute(select(OhlcBar)).scalar_one()
+  assert row.symbol == "BTC-USD"
+
+
+def test_fmp_stock_symbol_unchanged(unit_session):
+  from background.tasks.market_refresh_fmp import fetch_and_upsert_fmp
+
+  captured = {}
+
+  def _capture(url, params=None, timeout=None):
+    captured["params"] = params
+    resp = MagicMock(spec=httpx.Response)
+    resp.status_code = 200
+    resp.json.return_value = _HISTORICAL
+    resp.raise_for_status = MagicMock()
+    return resp
+
+  with patch("httpx.get", side_effect=_capture):
+    fetch_and_upsert_fmp(
+      symbol="BRK-B", timeframe="1D",
+      start="2024-03-27", end="2024-04-01",
+      session=unit_session,
+    )
+
+  # BRK-B is a real FMP ticker — must NOT be rewritten
+  assert captured["params"]["symbol"] == "BRK-B"
+
+
+# ---------------------------------------------------------------------------
 # Dispatch helper — respects --source / OHLC_SOURCE / settings.ohlc_source
 # ---------------------------------------------------------------------------
 

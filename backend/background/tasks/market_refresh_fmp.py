@@ -56,6 +56,18 @@ _HTTP_TIMEOUT = 30.0
 # yfinance default so dispatch behavior is the same across sources.
 _DEFAULT_START = "2010-01-01"
 
+# Crypto/forex pair suffixes. Our canonical symbols follow yfinance convention
+# (`BTC-USD`), but FMP's stable endpoint uses the concatenated form (`BTCUSD`)
+# and silently returns [] for the hyphenated form. Only the outbound API call
+# is rewritten; the DB and UI keep the canonical symbol.
+_FMP_PAIR_QUOTES = ("-USD", "-USDT", "-USDC")
+
+
+def _to_fmp_symbol(symbol: str) -> str:
+  if any(symbol.endswith(q) for q in _FMP_PAIR_QUOTES):
+    return symbol.replace("-", "")
+  return symbol
+
 
 def _fmp_get(path: str, **params: Any) -> Any:
   """GET /{path}; returns the decoded JSON unchanged.
@@ -136,7 +148,7 @@ def fetch_and_upsert_fmp(
     )
     data = _fmp_get(
       "/historical-price-eod/full",
-      symbol=symbol,
+      symbol=_to_fmp_symbol(symbol),
       **{"from": fetch_start, "to": fetch_end},
     )
 
